@@ -45,7 +45,7 @@ def train():
             )
         ),
         experiment=ExperimentConfig(
-            project="path_diffusion",
+            project="nanodiffusion",
             console=True,
             console_intervals={
                 "train": 10,

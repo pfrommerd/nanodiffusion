@@ -23,10 +23,11 @@ dependencies = [
 ]
 
 [project.scripts]
-train = "path_diffusion:train"
+train = "nanodiffusion:train"
 
 [dependency-groups]
 dev = [
+    "clearml-agent>=1.9.3",
     "ipykernel>=6.29.5",
     "pytest>=8.3.5",
 ]
@@ -38,7 +39,7 @@ members = ["nanoconfig"]
 nanoconfig = { workspace = true }
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/path_diffusion"]
+packages = ["src/nanodiffusion"]
 
 
 [build-system]
