@@ -19,5 +19,5 @@ uv run train
 ```
 
 
-[build-img]:https://github.com/chenyang-tri/anisotropic_diffusion/workflows/pytest-uv/badge.svg
-[build-url]:https://github.com/chenyang-tri/anisotropic_diffusion/actions?query=workflow%3Apytest-uv
+[build-img]:https://github.com/pfrommerd/nanodiffusion/workflows/pytest-uv/badge.svg
+[build-url]:https://github.com/pfrommerd/nanodiffusion/actions?query=workflow%3Apytest-uv
