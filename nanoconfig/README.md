@@ -1,1 +1,0 @@
-A nano-sized config library for ML projects.
