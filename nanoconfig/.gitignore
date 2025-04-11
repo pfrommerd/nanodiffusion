@@ -1,0 +1,21 @@
+.ipynb_checkpoints
+auto
+*.aux
+*.blg
+*.bbl
+*.log
+*.synctex.gz
+*~
+*.fdb_latexmk
+*.fls
+*.out
+*.toc
+*.rubbercache
+*.bcf
+*.nav
+*.run.xml
+*.snm
+__pycache__
+
+# Model checkpoints
+*.ckpt
