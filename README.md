@@ -1,7 +1,5 @@
 [![Build Status][build-img]][build-url]
 
-# Code for experiments for diffusion with anisotropic noise
-
 
 ### To install, first install UV
 ```bash
