@@ -15,7 +15,7 @@ from smalldiffusion import Schedule, ModelMixin
 from nanoconfig import config
 
 from .datasets import DataConfig, Sample
-from .models import ModelConfig
+from .models import DiffusionModel, ModelConfig
 
 from .utils import Interval, Iterations
 from .optimizers import OptimizerConfig
@@ -46,8 +46,9 @@ class DiffuserConfig:
 
 class Diffuser:
     def __init__(self, config: DiffuserConfig,
-            model : ModelMixin, schedule : Schedule, optimizer : Optimizer, 
-            lr_scheduler: LRScheduler, *,
+            model : DiffusionModel, schedule : Schedule,
+            optimizer : Optimizer | None = None,
+            lr_scheduler: LRScheduler | None = None, *,
             train_data : Dataset | None,
             test_data : Dataset | None,
             sample_steps : int = 16,
@@ -69,11 +70,12 @@ class Diffuser:
         self.total_iterations = total_iterations
         self.batch_size = batch_size
 
+    @staticmethod
     def from_config(config: DiffuserConfig, create_optimizer: bool = True) -> "Diffuser":
         train_data, test_data = config.data.create()
         sample = next(iter(train_data))
         model = config.model.create(sample)
-        optimizer, lr_scheduler = config.optimizer.create(model.parameters(), config.iterations) if create_optimizer else None
+        optimizer, lr_scheduler = config.optimizer.create(model.parameters(), config.iterations) if create_optimizer else (None, None)
         schedule = config.schedule.create()
         return Diffuser(
             config, model,
@@ -86,7 +88,7 @@ class Diffuser:
             sample_steps=config.sample_steps,
             total_iterations=config.iterations,
         )
-        
+
 
     def to_config(self) -> DiffuserConfig:
         return self.config
@@ -107,7 +109,7 @@ class Diffuser:
         diffuser.model.load_state_dict(data["model"])
         return diffuser
 
-    def train(self, iterations : Interval | int | None = None, 
+    def train(self, iterations : Interval | int | None = None,
               *,
               accelerator : Accelerator | None = None,
               experiment: Experiment | None = None,
@@ -115,8 +117,12 @@ class Diffuser:
               test_interval: Interval | int | None = Iterations(100),
               progress : bool = False
             ):
+        assert self.train_data is not None, "No training data provided"
+        assert self.test_data is not None, "No test data provided"
         iterations = iterations if iterations is not None else self.total_iterations
-        iterations_per_epoch = len(self.train_data) // self.batch_size
+        assert iterations is not None, "No iterations provided"
+
+        iterations_per_epoch = len(self.train_data) // self.batch_size # type: ignore
         iterations = Interval.to_iterations(iterations, iterations_per_epoch)
         total_epochs = (iterations + iterations_per_epoch - 1) // iterations_per_epoch
 
@@ -124,8 +130,9 @@ class Diffuser:
         test_interval = Interval.to_iterations(test_interval, iterations_per_epoch)
 
         accelerator = accelerator if accelerator else Accelerator()
-        
+
         num_workers = os.cpu_count()
+        if num_workers is None: num_workers = 0
 
         train_loader = DataLoader(self.train_data, shuffle=True,
             num_workers=num_workers, batch_size=self.batch_size)
@@ -143,7 +150,7 @@ class Diffuser:
             test_gen_loader = None
 
         (
-            model, optimizer, lr_scheduler, 
+            model, optimizer, lr_scheduler,
             train_loader, test_loader,
             test_gen_loader, train_gen_loader
         ) = accelerator.prepare(
@@ -185,7 +192,7 @@ class Diffuser:
             iteration = 0
             for _ in range(total_epochs):
                 if progress and total_epochs > 1:
-                    pbar.reset(epoch_iterations_task)
+                    pbar.reset(epoch_iterations_task) # type: ignore
                 for batch in train_loader:
                     with torch.no_grad():
                         x0, cond = batch.sample, batch.cond
@@ -203,7 +210,7 @@ class Diffuser:
                                           series="train", step=iteration)
                     with torch.no_grad():
                         self.model.eval()
-                        if iteration % test_interval == 0 and experiment:
+                        if test_interval and iteration % test_interval == 0 and experiment:
                             test_batch = next(test_loader)
                             x0, cond = test_batch.sample, test_batch.cond
                             x0, cond = x0.to(device), (cond.to(device) if cond is not None else None)
@@ -214,11 +221,11 @@ class Diffuser:
                             if experiment:
                                 experiment.log_metric("loss", loss.item(),
                                                       series="test", step=iteration)
-                        if iteration % generate_interval == 0 and experiment:
+                        if generate_interval and iteration % generate_interval == 0 and experiment:
                             if sample.cond is not None:
                                 train_cond = next(iter(train_gen_loader)).cond.to(device)
                                 test_cond = next(iter(test_gen_loader)).cond.to(device)
-                                *_, x0_train, = smalldiffusion.diffusion.samples(
+                                *_, x0_train = smalldiffusion.diffusion.samples(
                                     self.model, self.schedule.sample_sigmas(self.sample_steps),
                                     batchsize=self.batch_size, cond=train_cond, accelerator=accelerator
                                 )
@@ -226,14 +233,16 @@ class Diffuser:
                                     self.model, self.schedule.sample_sigmas(self.sample_steps),
                                     batchsize=self.batch_size, cond=test_cond, accelerator=accelerator
                                 )
-                                x0_train = Sample(cond=train_cond, sample=x0_train,
+                                x0_train = Sample(cond=train_cond, sample=x0_train, # type: ignore
                                     num_classes=sample.num_classes)
-                                x0_test = Sample(cond=test_cond, sample=x0_test,
+                                x0_test = Sample(cond=test_cond, sample=x0_test, # type: ignore
                                     num_classes=sample.num_classes)
                                 experiment.log({
-                                    "train/samples" : self.train_data.visualize_batch(x0_train),
-                                    "test/samples" : self.train_data.visualize_batch(x0_test)
-                                }, step=iteration)
+                                    "samples" : self.train_data.visualize_batch(x0_train),
+                                }, step=iteration, series="train")
+                                experiment.log({
+                                    "samples" : self.train_data.visualize_batch(x0_test)
+                                }, step=iteration, series="test")
                             else:
                                 *_, x0_samples, = smalldiffusion.diffusion.samples(
                                     self.model, self.schedule.sample_sigmas(self.sample_steps),
@@ -249,12 +258,12 @@ class Diffuser:
                     iteration += 1
                     # check if we are done
                     if progress:
-                        pbar.update(iterations_task, advance=1)
+                        pbar.update(iterations_task, advance=1) # type: ignore
                     if progress and total_epochs > 1:
-                        pbar.update(epoch_iterations_task, advance=1)
+                        pbar.update(epoch_iterations_task, advance=1) # type: ignore
                     if iteration >= iterations:
                         break
                 if progress and total_epochs > 1:
-                    pbar.update(epochs_task, advance=1)
+                    pbar.update(epochs_task, advance=1) # type: ignore
                 if iteration >= iterations:
                     break

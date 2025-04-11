@@ -8,13 +8,14 @@ import json
 import plotly.graph_objects
 import pandas as pd
 import rich
-import typing as tp
+import typing as ty
 import safetensors
 import safetensors.torch
 import torch
 import numpy as np
 import plotly
 
+import rich._log_render
 from rich.logging import RichHandler
 from rich.progress import ProgressColumn
 from rich.text import Text as RichText
@@ -24,6 +25,14 @@ from pathlib import Path
 class Interval:
     def iterations(self, epoch_steps: int) -> int:
         raise NotImplementedError
+
+    @ty.overload
+    @staticmethod
+    def to_iterations(interval: Interval | int, epoch_steps: int) -> int: ...
+
+    @ty.overload
+    @staticmethod
+    def to_iterations(interval: None, epoch_steps: int) -> None: ...
 
     @staticmethod
     def to_iterations(interval: Interval | int | None, epoch_steps: int) -> int | None:
@@ -75,7 +84,7 @@ FORMAT = "%(name)s - %(message)s"
 
 def setup_logging(show_path=False):
     # add_log_level("TRACE", logging.DEBUG - 5)
-    logging.getLogger("path_diffusion").setLevel(logging.INFO)
+    logging.getLogger("nanodiffusion").setLevel(logging.INFO)
     if rich.get_console().is_jupyter:
         return rich.reconfigure(
             force_jupyter=False,
@@ -111,7 +120,7 @@ def patch_kaleido():
         return
     try:
         import kaleido.executable
-        path = Path(kaleido.executable.__path__[0])
+        path = Path(kaleido.executable.__path__[0]) # type: ignore
         with open(path / "kaleido", "r") as f:
             first_line = f.readline()
             rest = f.read()

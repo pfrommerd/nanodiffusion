@@ -4,23 +4,34 @@ warnings.filterwarnings("ignore", category=SyntaxWarning)
 import logging
 
 from accelerate import Accelerator
+from pathlib import Path
+
 from .utils import setup_logging
 
 from .diffuser import Diffuser, DiffuserConfig
 from .optimizers import AdamwConfig
 from .schedules import LogLinearScheduleConfig
 
-from nanoconfig import config, field, options
-from nanoconfig.experiment import ExperimentConfig
+from nanoconfig import config, field
+from nanoconfig.options import Options
+from nanoconfig.experiment import Experiment, ExperimentConfig
 
-from .datasets import tree_dataset
+from .datasets import perlin
 from .models import mlp
+
 logger = logging.getLogger(__name__)
 
 @config
 class TrainConfig:
     diffuser: DiffuserConfig = field(flat=True)
     experiment: ExperimentConfig = field(flat=True)
+
+def run(experiment: Experiment, config: TrainConfig):
+    diffuser = Diffuser.from_config(config.diffuser)
+    diffuser.train(
+        progress=True,
+        experiment=experiment
+    )
 
 def train():
     setup_logging()
@@ -38,7 +49,7 @@ def train():
                 betas=(0.9, 0.999),
                 eps=1e-8
             ),
-            data=tree_dataset.TreeDataConfig(),
+            data=perlin.PerlinDataConfig(),
             model=mlp.MlpConfig(
                 hidden_features=(64, 64, 128, 128, 64, 64),
                 cond_features=4
@@ -47,20 +58,18 @@ def train():
         experiment=ExperimentConfig(
             project="nanodiffusion",
             console=True,
+            clearml=True,
             console_intervals={
                 "train": 10,
                 "test": 100
             }
         )
     )
-    opts = options.as_options(TrainConfig, default=default)
-    parsed = options.parse_cli_options(opts)
-    config = options.from_parsed_options(parsed, TrainConfig, default=default)
-
-    diffuser = Diffuser.from_config(config.diffuser)
-
-    experiment = config.experiment.create(logger)
-    diffuser.train(
-        progress=True,
-        experiment=experiment
+    opts = Options.as_options(TrainConfig, default=default)
+    config = opts.from_parsed(opts.parse())
+    experiment = config.experiment.create(
+        logger,
+        (Path(__file__) / ".." / "..").absolute(),
+        run, config=config
     )
+    experiment.run()
