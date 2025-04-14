@@ -26,7 +26,11 @@ class TrainConfig:
     diffuser: DiffuserConfig = field(flat=True)
     experiment: ExperimentConfig = field(flat=True)
 
-def run(experiment: Experiment, config: TrainConfig):
+def run(experiment: Experiment):
+    # re-setup logging in case we are running
+    # on the remote server
+    setup_logging()
+    config : TrainConfig = experiment.config # type: ignore
     diffuser = Diffuser.from_config(config.diffuser)
     diffuser.train(
         progress=True,
@@ -35,7 +39,6 @@ def run(experiment: Experiment, config: TrainConfig):
 
 def train():
     setup_logging()
-
     default = TrainConfig(
         diffuser=DiffuserConfig(
             schedule=LogLinearScheduleConfig(
@@ -60,7 +63,7 @@ def train():
             console=True,
             clearml=True,
             console_intervals={
-                "train": 10,
+                "train": 100,
                 "test": 100
             }
         )
@@ -69,7 +72,6 @@ def train():
     config = opts.from_parsed(opts.parse())
     experiment = config.experiment.create(
         logger,
-        (Path(__file__) / ".." / "..").absolute(),
         run, config=config
     )
     experiment.run()

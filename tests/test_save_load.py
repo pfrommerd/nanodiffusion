@@ -1,10 +1,10 @@
 from io import BytesIO
 
-from path_diffusion.datasets.tree_dataset import TreeDataConfig
-from path_diffusion.models.mlp import MlpConfig
-from path_diffusion.schedules import LogLinearScheduleConfig
-from path_diffusion.optimizers import AdamwConfig
-from path_diffusion import Diffuser, DiffuserConfig
+from nanodiffusion.datasets.perlin import PerlinDataConfig
+from nanodiffusion.models.mlp import MlpConfig
+from nanodiffusion.schedules import LogLinearScheduleConfig
+from nanodiffusion.optimizers import AdamwConfig
+from nanodiffusion.diffuser import Diffuser, DiffuserConfig
 
 def test_save_load():
     config = DiffuserConfig(
@@ -20,10 +20,10 @@ def test_save_load():
             eps=1e-8
         ),
         model=MlpConfig(),
-        data=TreeDataConfig()
+        data=PerlinDataConfig()
     )
     diffuser = Diffuser.from_config(config)
-    
+
     data = BytesIO()
     diffuser.save(data)
     data.seek(0)

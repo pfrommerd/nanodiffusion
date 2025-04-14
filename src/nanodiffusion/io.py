@@ -35,7 +35,7 @@ def save(file, data : dict[str, tp.Any]):
     metadata = {k: json.dumps(v) for k,v in metadata.items()}
     # Get all tensor objects
     tensors = {k:v for k,v in data.items() if isinstance(v, (torch.Tensor, np.ndarray))}
-    tensors = safetensors.torch._flatten(tensors)
+    tensors = safetensors.torch._flatten(tensors) # type: ignore
     if isinstance(file, (str, Path)):
         safetensors.serialize_file(tensors, file, metadata)
     else:

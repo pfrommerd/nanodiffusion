@@ -7,11 +7,8 @@ requires-python = ">=3.13"
 dependencies = [
     "accelerate>=1.6.0",
     "clearml>=1.18.0",
-    "flax>=0.10.5",
-    "jax[cuda]>=0.5.3",
     "kaleido==0.2.1",
     "matplotlib>=3.10.1",
-    "ml-collections>=1.0.0",
     "nanoconfig",
     "numpy>=2.2.4",
     "pandas>=2.2.3",
@@ -21,6 +18,9 @@ dependencies = [
     "smalldiffusion>=0.4.3",
     "torch>=2.6.0",
 ]
+
+[project.scripts]
+train = "nanodiffusion:train"
 
 [dependency-groups]
 dev = [
@@ -37,7 +37,7 @@ build-backend = "hatchling.build"
 members = ["nanoconfig"]
 
 [tool.uv.sources]
-nanoconfig = { workspace = true }
+nanoconfig = { git = "https://github.com/pfrommerd/nanoconfig.git" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nanodiffusion"]

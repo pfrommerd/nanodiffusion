@@ -10,11 +10,10 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 
 from accelerate import Accelerator
-from ml_collections import ConfigDict
 from smalldiffusion import Schedule, ModelMixin
-from nanoconfig import config
+from nanoconfig import config, Config
 
-from .datasets import DataConfig, Sample
+from .datasets import DataConfig, Sample, SampleDataset
 from .models import DiffusionModel, ModelConfig
 
 from .utils import Interval, Iterations
@@ -34,7 +33,7 @@ from rich.progress import (
 from .utils import MofNColumn
 
 @config
-class DiffuserConfig:
+class DiffuserConfig(Config):
     optimizer : OptimizerConfig
     schedule : ScheduleConfig
     model: ModelConfig
@@ -49,8 +48,8 @@ class Diffuser:
             model : DiffusionModel, schedule : Schedule,
             optimizer : Optimizer | None = None,
             lr_scheduler: LRScheduler | None = None, *,
-            train_data : Dataset | None,
-            test_data : Dataset | None,
+            train_data : SampleDataset | None,
+            test_data : SampleDataset | None,
             sample_steps : int = 16,
             ############## Default training parameters ##############
             batch_size : int = 32,
@@ -206,8 +205,9 @@ class Diffuser:
                     optimizer.step()
                     lr_scheduler.step()
 
-                    experiment.log_metric("loss", loss.item(),
-                                          series="train", step=iteration)
+                    if experiment:
+                        experiment.log_metric("loss", loss.item(),
+                                            series="train", step=iteration)
                     with torch.no_grad():
                         self.model.eval()
                         if test_interval and iteration % test_interval == 0 and experiment:
@@ -246,14 +246,13 @@ class Diffuser:
                             else:
                                 *_, x0_samples, = smalldiffusion.diffusion.samples(
                                     self.model, self.schedule.sample_sigmas(self.sample_steps),
-                                    batchsize=self.batch_size, cond=train_cond, accelerator=accelerator
+                                    batchsize=self.batch_size, cond=None, accelerator=accelerator
                                 )
-                                x0_samples = Sample(cond=None, sample=x0_samples,
+                                x0_samples = Sample(cond=None, sample=x0_samples, # type: ignore
                                     num_classes=sample.num_classes)
                                 experiment.log({
                                     "test/samples" : self.train_data.visualize_batch(x0_samples)
                                 }, step=iteration)
-
                         self.model.train()
                     iteration += 1
                     # check if we are done
