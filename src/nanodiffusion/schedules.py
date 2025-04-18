@@ -19,7 +19,7 @@ class ScheduleConfig(abc.ABC):
 @config(variant="loglinear")
 class LogLinearScheduleConfig(ScheduleConfig):
     sigma_min: float = 1e-3
-    sigma_max: float = 1e0
+    sigma_max: float = 1e10
 
     def create(self) -> ScheduleLogLinear:
         return ScheduleLogLinear(

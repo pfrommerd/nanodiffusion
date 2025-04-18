@@ -1,4 +1,6 @@
 import warnings
+
+from numpy import c_
 warnings.filterwarnings("ignore", category=SyntaxWarning)
 
 import logging
@@ -7,6 +9,9 @@ from accelerate import Accelerator
 from pathlib import Path
 
 from .utils import setup_logging
+
+from .datasets.tree import TreeDataConfig
+from .datasets.trajectory import TrajectoryDataConfig
 
 from .diffuser import Diffuser, DiffuserConfig
 from .optimizers import AdamwConfig
@@ -25,6 +30,7 @@ logger = logging.getLogger(__name__)
 class TrainConfig:
     diffuser: DiffuserConfig = field(flat=True)
     experiment: ExperimentConfig = field(flat=True)
+    cpu: bool = False
 
 def run(experiment: Experiment):
     # re-setup logging in case we are running
@@ -32,9 +38,11 @@ def run(experiment: Experiment):
     setup_logging()
     config : TrainConfig = experiment.config # type: ignore
     diffuser = Diffuser.from_config(config.diffuser)
+    a = Accelerator(cpu=config.cpu)
     diffuser.train(
         progress=True,
-        experiment=experiment
+        experiment=experiment,
+        accelerator=a
     )
 
 def train():
@@ -42,9 +50,9 @@ def train():
     default = TrainConfig(
         diffuser=DiffuserConfig(
             schedule=LogLinearScheduleConfig(
-                timesteps=1000,
-                sigma_min=0.0001,
-                sigma_max=1
+                timesteps=256,
+                sigma_min=0.001,
+                sigma_max=20
             ),
             optimizer=AdamwConfig(
                 lr=1e-4,
@@ -52,11 +60,15 @@ def train():
                 betas=(0.9, 0.999),
                 eps=1e-8
             ),
-            data=perlin.PerlinDataConfig(),
+            data=TreeDataConfig(),
             model=mlp.MlpConfig(
                 hidden_features=(64, 64, 128, 128, 64, 64),
-                cond_features=4
-            )
+                cond_embed_features=64
+            ),
+            gen_batch_size=512,
+            batch_size=512,
+            test_batch_size=512,
+            iterations=50_000
         ),
         experiment=ExperimentConfig(
             project="nanodiffusion",

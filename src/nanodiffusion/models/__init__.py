@@ -4,7 +4,10 @@ from smalldiffusion import ModelMixin
 import torch.nn as nn
 import abc
 
-class DiffusionModel(nn.Module, ModelMixin): ...
+class DiffusionModel(nn.Module, ModelMixin):
+    def __init__(self, sample_shape):
+        super().__init__()
+        self.input_dims = sample_shape
 
 @config
 class ModelConfig(abc.ABC):

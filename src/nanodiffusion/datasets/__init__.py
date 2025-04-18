@@ -19,9 +19,14 @@ class Sample:
     # is meant to be used directly
     num_classes: int | None = None
 
+    def to(self, device: torch.device):
+        cond = self.cond.to(device) if self.cond is not None else None
+        sample = self.sample.to(device)
+        return Sample(cond, sample, self.num_classes)
+
 class SampleDataset(Dataset, ty.Sized, abc.ABC):
     @abc.abstractmethod
-    def visualize_batch(self, batch: Sample) -> NestedResult:
+    def visualize_batch(self, samples: Sample) -> NestedResult:
         pass
 
 # When we collate a batch of samples, we need to
