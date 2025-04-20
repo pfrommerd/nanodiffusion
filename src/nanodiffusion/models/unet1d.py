@@ -1,4 +1,5 @@
 import torch
+import math
 import typing as ty
 
 from einops import rearrange
@@ -6,9 +7,10 @@ from itertools import pairwise
 from torch import nn
 from smalldiffusion.model import (
     Attention, ModelMixin, CondSequential, SigmaEmbedderSinCos,
+    CondEmbedderLabel
 )
 from nanoconfig import config
-from . import ModelConfig
+from . import ModelConfig, DiffusionModel
 from ..datasets import Sample
 
 def Normalize(ch):
@@ -83,7 +85,7 @@ class AttnBlock(nn.Module):
         h_ = rearrange(h_, 'b l c -> b c l')
         return x + self.proj_out(h_)
 
-class Unet(nn.Module, ModelMixin):
+class Unet(DiffusionModel):
     def __init__(self, in_dim, in_ch, out_ch,
                  ch               = 128,
                  ch_mult          = (1,2,2,2),
@@ -95,13 +97,12 @@ class Unet(nn.Module, ModelMixin):
                  sig_embed        = None,
                  cond_embed       = None,
                  ):
-        super().__init__()
-
+        super().__init__((in_dim, in_ch))
         self.ch = ch
         self.in_dim = in_dim
+        self.in_ch = in_ch
         self.num_resolutions = len(ch_mult)
         self.num_res_blocks = num_res_blocks
-        self.input_dims = (in_ch, in_dim)
         self.temb_ch = self.ch * embed_ch_mult
 
         # Embeddings
@@ -116,11 +117,12 @@ class Unet(nn.Module, ModelMixin):
         in_ch_dim = [ch * m for m in (1,)+ch_mult]
         self.conv_in = torch.nn.Conv1d(in_ch, self.ch, kernel_size=3, stride=1, padding=1)
         self.downs = nn.ModuleList()
+        block_in, block_out = 0, 0
         for i, (block_in, block_out) in enumerate(pairwise(in_ch_dim)):
             down = nn.Module()
             down.blocks = nn.ModuleList()
             for _ in range(self.num_res_blocks):
-                block = [make_block(block_in, block_out)]
+                block : list = [make_block(block_in, block_out)]
                 if curr_res in attn_resolutions:
                     block.append(AttnBlock(block_out))
                 down.blocks.append(CondSequential(*block))
@@ -148,52 +150,61 @@ class Unet(nn.Module, ModelMixin):
                     skip_in = next_skip_in
                 block = [make_block(block_in+skip_in, block_out)]
                 if curr_res in attn_resolutions:
-                    block.append(AttnBlock(block_out))
+                    block.append(AttnBlock(block_out)) # type: ignore
                 up.blocks.append(CondSequential(*block))
                 block_in = block_out
             if i_level < self.num_resolutions - 1: # Not last iter
-                up.upsample = Upsample(block_in)
+                up.upsample = Upsample(block_in) # type: ignore
                 curr_res = curr_res * 2
             self.ups.append(up)
 
         # Out
         self.out_layer = nn.Sequential(
-            Normalize(block_in),
+            Normalize(block_in), # type: ignore
             nn.SiLU(),
-            torch.nn.Conv1d(block_in, out_ch, kernel_size=3, stride=1, padding=1),
+            torch.nn.Conv1d(block_in, out_ch, # type: ignore
+                kernel_size=3, stride=1, padding=1),
         )
 
     def forward(self, x, sigma, cond=None):
-        assert x.shape[2] == self.in_dim
-
+        assert x.ndim == 3
+        assert x.shape[-1] == self.in_ch
+        assert x.shape[-2] == self.in_dim
+        # Turn B T C -> B C T
+        x = torch.transpose(x, -1, -2)
+        cond = cond.view(cond.shape[0], -1) if cond is not None else None
         # Embeddings
         emb = self.sig_embed(x.shape[0], sigma.squeeze())
         if self.cond_embed is not None:
             assert cond is not None and x.shape[0] == cond.shape[0], \
                 'Conditioning must have same batches as x!'
-            emb += self.cond_embed(cond)
+            cond_embed = self.cond_embed(cond)
+            emb += cond_embed
 
         # downsampling
         hs = [self.conv_in(x)]
         for down in self.downs:
-            for block in down.blocks:
+            for block in down.blocks: # type: ignore
                 h = block(hs[-1], emb)
                 hs.append(h)
             if hasattr(down, 'downsample'):
-                hs.append(down.downsample(hs[-1]))
+                hs.append(down.downsample(hs[-1])) # type: ignore
 
         # middle
         h = self.mid(hs[-1], emb)
 
         # upsampling
         for up in self.ups:
-            for block in up.blocks:
+            for block in up.blocks: # type: ignore
                 h = block(torch.cat([h, hs.pop()], dim=1), emb)
             if hasattr(up, 'upsample'):
-                h = up.upsample(h)
+                h = up.upsample(h) # type: ignore
 
         # out
-        return self.out_layer(h)
+        out = self.out_layer(h)
+        # Turn B C T -> B T C
+        out = torch.transpose(out, -1, -2)
+        return out
 
 @config(variant="unet1d")
 class Unet1DConfig(ModelConfig):
@@ -205,9 +216,11 @@ class Unet1DConfig(ModelConfig):
     dropout: float = 0.1
     resample_with_conv: bool = True
 
-    def create(self, sample: Sample):
+    def create(self, sample: Sample) -> DiffusionModel:
+        embed_features = self.base_channels * self.embed_channel_mult
+        cond_features = math.prod(sample.cond.shape) if sample.cond is not None else 0
         return Unet(
-            in_dim=sample.sample.shape,
+            in_dim=sample.sample.shape[-2],
             in_ch=sample.sample.shape[-1],
             out_ch=sample.sample.shape[-1],
             ch=self.base_channels,
@@ -216,7 +229,12 @@ class Unet1DConfig(ModelConfig):
             num_res_blocks=self.num_res_blocks,
             attn_resolutions=self.attn_resolutions,
             dropout=self.dropout,
-            resamp_with_conv=self.resample_with_conv,
-            sig_embed=SigmaEmbedderSinCos(self.base_channels * self.embed_channel_mult),
-            cond_embed=CondSequential(self.cond_embed) if sample.cond is not None else None
+            resample_with_conv=self.resample_with_conv,
+            sig_embed=SigmaEmbedderSinCos(embed_features),
+            cond_embed=(
+                (CondEmbedderLabel(embed_features, sample.num_classes)
+                    if sample.num_classes is not None else
+                nn.Linear(cond_features, embed_features))
+                if sample.cond is not None else None
+            )
         )

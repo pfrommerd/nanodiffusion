@@ -24,7 +24,7 @@ def _(dataset):
 
 @app.cell
 def _(DataLoader, dataset):
-    loader = DataLoader(dataset, batch_size=512, shuffle=True)
+    loader = DataLoader(dataset, batch_size=1024, shuffle=True)
     import time
     t = time.time()
     iteration = 0
@@ -34,7 +34,13 @@ def _(DataLoader, dataset):
             iteration += 1
     took = time.time() - t
     print(iteration / took, "iter/second", "total", iteration, took, "seconds")
+    del e
     return batch, e, iteration, loader, t, time, took
+
+
+@app.cell
+def _():
+    return
 
 
 if __name__ == "__main__":

@@ -22,7 +22,7 @@ from nanoconfig.options import Options
 from nanoconfig.experiment import Experiment, ExperimentConfig
 
 from .datasets import perlin
-from .models import mlp
+from .models import mlp, unet1d
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,13 @@ class TrainConfig:
     experiment: ExperimentConfig = field(flat=True)
     cpu: bool = False
 
-def run(experiment: Experiment):
+    def run(self, logger):
+        experiment = self.experiment.create(
+            logger, _run_experiment, config=self # type: ignore
+        )
+        return experiment.run()
+
+def _run_experiment(experiment: Experiment):
     # re-setup logging in case we are running
     # on the remote server
     setup_logging()
@@ -44,6 +50,7 @@ def run(experiment: Experiment):
         experiment=experiment,
         accelerator=a
     )
+    return diffuser
 
 def train():
     setup_logging()
@@ -73,7 +80,6 @@ def train():
         experiment=ExperimentConfig(
             project="nanodiffusion",
             console=True,
-            clearml=True,
             console_intervals={
                 "train": 100,
                 "test": 100
@@ -82,8 +88,9 @@ def train():
     )
     opts = Options.as_options(TrainConfig, default=default)
     config = opts.from_parsed(opts.parse())
+
     experiment = config.experiment.create(
         logger,
-        run, config=config
+        _run_experiment, config=config
     )
     experiment.run()

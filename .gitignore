@@ -1,6 +1,8 @@
 .dropbox
 .ipynb_checkpoints
 auto
+wandb
+__marimo__
 *.aux
 *.blg
 *.bbl

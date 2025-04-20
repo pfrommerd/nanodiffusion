@@ -29,6 +29,10 @@ class SampleDataset(Dataset, ty.Sized, abc.ABC):
     def visualize_batch(self, samples: Sample) -> NestedResult:
         pass
 
+    @property
+    def in_memory(self) -> bool:
+        return False
+
 # When we collate a batch of samples, we need to
 # keep the num_classes the same
 def sample_collate_fn(batch, *, collate_fn_map):

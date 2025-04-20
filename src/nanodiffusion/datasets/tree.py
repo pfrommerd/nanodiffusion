@@ -3,6 +3,7 @@ import torch
 import pandas as pd
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
+import plotly.tools as tls
 
 from . import Sample, DataConfig, SampleDataset
 
@@ -106,16 +107,19 @@ class TreeDataset(SampleDataset):
         self.samples = torch.tensor(samples, dtype=torch.float32)
         self.labels = torch.tensor(labels, dtype=torch.int)
 
+    @property
+    def in_memory(self) -> bool:
+        return True
+
     def visualize_batch(self, samples: Sample):
         cond = samples.cond.cpu().numpy() if samples.cond is not None else None
         cond = cond.astype(float) if cond is not None else None
         sample = samples.sample.cpu().numpy()
-        # data = pd.DataFrame([
-        #     {"x": s[0], "y": s[1], "label": c} for s, c in zip(sample, cond)
-        # ])
         fig, ax = plt.subplots()
         ax.scatter(sample[:, 0], sample[:, 1], c=cond, cmap='viridis', s=5)
-        return Figure(fig)
+        figure = tls.mpl_to_plotly(fig)
+        plt.close(fig)
+        return Figure(figure)
 
     def __len__(self):
         return self.labels.shape[0]

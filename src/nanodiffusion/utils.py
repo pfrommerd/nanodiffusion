@@ -73,7 +73,7 @@ class MofNColumn(ProgressColumn):
             style="progress.percentage",
         )
 
-class CustomLogRender(rich._log_render.LogRender):
+class CustomLogRender(rich._log_render.LogRender): # type: ignore
     def __call__(self, *args, **kwargs):
         output = super().__call__(*args, **kwargs)
         if not self.show_path:

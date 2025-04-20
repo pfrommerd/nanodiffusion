@@ -1,7 +1,9 @@
 # import torch
+from re import X
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.special import comb
+import plotly.graph_objects as go
+from scipy.special import comb, y0
 import random
 import heapq
 import torch.utils.data
@@ -47,8 +49,11 @@ class TrajectoryDataset(SampleDataset):
         # Generate trajectories
         self.trajectories = []  # Will store 2xN tensors
         self.labels = []        # Will store 2x2 tensors (start and end cell coordinates)
-
         self._generate_dataset()
+
+    @property
+    def in_memory(self) -> bool:
+        return True
 
     def __len__(self):
         return self.T
@@ -266,58 +271,52 @@ class TrajectoryDataset(SampleDataset):
             # Validate trajectory
             if self._is_valid_trajectory(trajectory):
                 # Convert to tensor and store
-                traj_tensor = torch.tensor(trajectory, dtype=torch.float32).T
-                label_tensor = torch.tensor([start_cell, end_cell], dtype=torch.float32)
+                traj_tensor = torch.tensor(trajectory, dtype=torch.float32)
+                label_tensor = torch.stack((traj_tensor[0], traj_tensor[-1]), dim=0)
                 self.trajectories.append(traj_tensor)
                 self.labels.append(label_tensor)
 
-    def create_base_plot(self, ax):
-        # Draw grid
-        cell_width = 2.0 / self.M
-        for i in range(self.M + 1):
-            ax.axhline(1.0 - i * cell_width, color='gray', linestyle='-', alpha=0.3)
-            ax.axvline(-1.0 + i * cell_width, color='gray', linestyle='-', alpha=0.3)
-
-        # Highlight allowed cells
-        for i, j in self.allowed_cells:
-            x_min, x_max, y_min, y_max = self._get_cell_bounds(i, j)
-            width = x_max - x_min
-            height = y_max - y_min
-            rect = plt.Rectangle((x_min, y_min), width, height, # type: ignore
-                    color='lightgray', alpha=0.3)
-            ax.add_patch(rect)
-
-            # Show allowed region with margins
-            x_min, x_max, y_min, y_max = self._get_allowed_region(i, j)
-            width = x_max - x_min
-            height = y_max - y_min
-            rect = plt.Rectangle((x_min, y_min), width, height, # type: ignore
-                color='lightblue', alpha=0.3)
-            ax.add_patch(rect)
-
-        # Set limits and labels
-        ax.set_xlim((-1.05, 1.05))
-        ax.set_ylim((-1.05, 1.05))
-        ax.set_xlabel('X')
-        ax.set_ylabel('Y')
-        ax.set_title(f'Trajectories on 2D Grid')
-        ax.grid(True, alpha=0.3)
-        ax.set_aspect('equal')
-        return ax
-
-
     def visualize_batch(self, samples : Sample):
         """Visualize trajectories on the grid"""
-        fig, ax = plt.subplots()
-        self.create_base_plot(ax)
-        # Draw trajectories
-        for i in range(samples.sample.shape[0]):
-            traj = self.trajectories[i].numpy().T
-            ax.plot(traj[:, 0], traj[:, 1], '-', lw=2, alpha=0.7)
-            ax.plot(traj[0, 0], traj[0, 1], 'go', markersize=5)  # Start point
-            ax.plot(traj[-1, 0], traj[-1, 1], 'ro', markersize=5)  # End point
-        fig.tight_layout()
-        return Figure(fig)
+        assert samples.cond is not None
+        cond = samples.cond.cpu().numpy()
+        sample = samples.sample.cpu().numpy()
+        N_traj = cond.shape[0]
+        fig = go.Figure(layout=dict(
+            xaxis=dict(range=[-1.1, 1.1], showgrid=False, showline=False, zeroline=False),
+            yaxis=dict(range=[-1.1, 1.1], showgrid=False, showline=False, zeroline=False),
+            plot_bgcolor='white', paper_bgcolor='white', showlegend=False
+        ))
+        for (i,j) in self.allowed_cells:
+            x_min, x_max, y_min, y_max = self._get_cell_bounds(i, j)
+            fig.add_shape(
+                type="rect",
+                x0=x_min, y0=y_min, x1=x_max, y1=y_max,
+                fillcolor='lightgray', layer='below', line_width=0
+            )
+            x_min, x_max, y_min, y_max = self._get_allowed_region(i, j)
+            fig.add_shape(
+                type="rect",
+                x0=x_min, y0=y_min, x1=x_max, y1=y_max,
+                fillcolor='lightblue', layer='below', line_width=0,
+                opacity=0.5
+            )
+        for i in range(N_traj):
+            fig.add_trace(go.Scatter(
+                    x=sample[i,:,0], y=sample[i,:,1],
+                    mode='lines'
+            ))
+        fig.add_trace(go.Scatter(
+            x=cond[:,0, 0], y=cond[:,0,1],
+            mode='markers',
+            marker=dict(size=10, color='green')
+        ))
+        fig.add_trace(go.Scatter(
+                    x=cond[:,1,0], y=cond[:,1,1],
+                    mode='markers',
+                    marker=dict(size=10, color='red')
+        ))
+        return Figure(fig, static=True)
 
 @config(variant="trajectory")
 class TrajectoryDataConfig(DataConfig):

@@ -18,6 +18,7 @@ dependencies = [
     "scipy>=1.15.2",
     "smalldiffusion>=0.4.3",
     "torch>=2.6.0",
+    "wandb>=0.19.9",
 ]
 
 [project.scripts]
