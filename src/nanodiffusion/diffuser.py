@@ -91,8 +91,10 @@ class Diffuser:
         self.gen_batch_size = gen_batch_size
 
     @staticmethod
-    def from_config(config: DiffuserConfig, create_optimizer: bool = True) -> "Diffuser":
-        train_data, test_data = config.data.create()
+    def from_config(config: DiffuserConfig,
+                create_optimizer: bool = True,
+                experiment: Experiment | None = None) -> "Diffuser":
+        train_data, test_data = config.data.create(experiment)
         sample = next(iter(train_data))
         model = config.model.create(sample)
         optimizer, lr_scheduler = config.optimizer.create(model.parameters(), config.iterations) if create_optimizer else (None, None)
@@ -126,7 +128,7 @@ class Diffuser:
         io.save(file, data)
 
     @staticmethod
-    def load(file, load_optim_state: bool = False, device=None):
+    def load(file, load_optim_state: bool = False, device="cpu"):
         data = io.load(file, device=device)
         config = DiffuserConfig.from_dict(data["config"])
         diffuser = Diffuser.from_config(config)
@@ -135,14 +137,17 @@ class Diffuser:
 
     def sample(self, N: int = 1, cond: torch.Tensor | None = None, seed: int | None = None,
                     accelerator: Accelerator | None = None):
+        accelerator = accelerator or Accelerator()
+        model = accelerator.prepare(self.model)
         if seed is not None:
             torch.manual_seed(seed)
         if cond is None:
             loader = DataLoader(self.train_data, batch_size=N, shuffle=True) # type: ignore
             cond = next(iter(loader)).cond # type: ignore
+            cond = cond.to(accelerator.device) # type: ignore
             N = min(N, cond.shape[0]) # type: ignore
         *_, samples = smalldiffusion.diffusion.samples(
-            self.model, self.schedule.sample_sigmas(self.sample_steps),
+            model, self.schedule.sample_sigmas(self.sample_steps),
             batchsize=N, cond=cond, accelerator=accelerator
         )
         return Sample(cond, samples, num_classes=self.data_sample.num_classes) # type: ignore

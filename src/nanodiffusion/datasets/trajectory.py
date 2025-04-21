@@ -6,15 +6,18 @@ import plotly.graph_objects as go
 from scipy.special import comb, y0
 import random
 import heapq
+import typing as ty
 import torch.utils.data
 from nanoconfig import config
+from nanoconfig.experiment import Experiment
 from . import Sample, DataConfig, SampleDataset
 
 from nanoconfig.experiment import Figure
 
 class TrajectoryDataset(SampleDataset):
-    def __init__(self, num_trajectories=50, points_per_trajectory=64, grid_size=6, margin=0.1,
-                 allowed_cells=None, seed=0):
+    def __init__(self, num_trajectories=50, points_per_trajectory=64,
+                grid_size=6, margin=0.1, allowed_cells=None,
+                seed=0, experiment=None):
         """
         Args:
             num_trajectories: Number of trajectories in the dataset
@@ -23,7 +26,14 @@ class TrajectoryDataset(SampleDataset):
             margin: Margin to shrink allowed regions by
             allowed_cells: List of (i, j) tuples representing allowed cells
         """
-        self.T = num_trajectories
+        super().__init__({
+            'num_trajectories': num_trajectories,
+            'points_per_trajectory': points_per_trajectory,
+            'grid_size': grid_size,
+            'margin': margin,
+            'allowed_cells': allowed_cells,
+        }, seed, experiment)
+        self.num_trajectories = num_trajectories
         self.N = points_per_trajectory
         self.M = grid_size
         self.margin = margin
@@ -45,21 +55,6 @@ class TrajectoryDataset(SampleDataset):
                                 if c == 'o']
         else:
             self.allowed_cells = allowed_cells
-
-        # Generate trajectories
-        self.trajectories = []  # Will store 2xN tensors
-        self.labels = []        # Will store 2x2 tensors (start and end cell coordinates)
-        self._generate_dataset()
-
-    @property
-    def in_memory(self) -> bool:
-        return True
-
-    def __len__(self):
-        return self.T
-
-    def __getitem__(self, idx):
-        return Sample(sample=self.trajectories[idx], cond=self.labels[idx], num_classes=None)
 
     def _get_cell_bounds(self, i, j):
         """Get the bounds of cell (i, j) in the [-1, 1] x [-1, 1] space"""
@@ -246,9 +241,10 @@ class TrajectoryDataset(SampleDataset):
 
         return True
 
-    def _generate_dataset(self):
+    def generate(self, seed) -> ty.Iterator[Sample]:
         """Generate the full dataset of trajectories"""
-        while len(self.trajectories) < self.T:
+        i = 0
+        while i < self.num_trajectories:
             # Select random start and end cells
             start_cell = random.choice(self.allowed_cells)
             end_cell = random.choice(self.allowed_cells)
@@ -273,8 +269,8 @@ class TrajectoryDataset(SampleDataset):
                 # Convert to tensor and store
                 traj_tensor = torch.tensor(trajectory, dtype=torch.float32)
                 label_tensor = torch.stack((traj_tensor[0], traj_tensor[-1]), dim=0)
-                self.trajectories.append(traj_tensor)
-                self.labels.append(label_tensor)
+                yield Sample(cond=label_tensor, sample=traj_tensor)
+                i += 1
 
     def visualize_batch(self, samples : Sample):
         """Visualize trajectories on the grid"""
@@ -327,14 +323,15 @@ class TrajectoryDataConfig(DataConfig):
     allowed_cells: list[tuple[int, int]] | None = None
     seed: int = 0
 
-    def create(self) -> tuple[SampleDataset, SampleDataset]:
+    def create(self, experiment: Experiment | None = None) -> tuple[SampleDataset, SampleDataset]:
         test_data = TrajectoryDataset(
             num_trajectories=self.num_trajectories // 4,
             points_per_trajectory=self.points_per_trajectory,
             grid_size=self.grid_size,
             margin=self.margin,
             allowed_cells=self.allowed_cells,
-            seed=self.seed
+            seed=self.seed,
+            experiment=experiment
         )
         train_data = TrajectoryDataset(
             num_trajectories=self.num_trajectories,
@@ -342,6 +339,7 @@ class TrajectoryDataConfig(DataConfig):
             grid_size=self.grid_size,
             margin=self.margin,
             allowed_cells=self.allowed_cells,
-            seed=self.seed
+            seed=self.seed,
+            experiment=experiment
         )
         return train_data, test_data

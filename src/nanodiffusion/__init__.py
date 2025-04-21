@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 class TrainConfig:
     diffuser: DiffuserConfig = field(flat=True)
     experiment: ExperimentConfig = field(flat=True)
+    final_checkpoint: bool = True
     cpu: bool = False
 
     def run(self, logger):
@@ -48,7 +49,12 @@ def _run_experiment(experiment: Experiment):
         experiment=experiment,
         accelerator=a
     )
-    return diffuser
+    if config.final_checkpoint:
+        with experiment.create_artifact("diffuser", type="model") as builder:
+            with builder.create_file("model.safetensors") as f:
+                diffuser.save(f)
+            artifact = builder.build()
+        return diffuser
 
 def train():
     setup_logging()

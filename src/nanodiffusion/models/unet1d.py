@@ -114,7 +114,7 @@ class Unet(DiffusionModel):
 
         # Downsampling
         curr_res = in_dim
-        in_ch_dim = [ch * m for m in (1,)+ch_mult]
+        in_ch_dim = [ch * m for m in (1,)+tuple(ch_mult)]
         self.conv_in = torch.nn.Conv1d(in_ch, self.ch, kernel_size=3, stride=1, padding=1)
         self.downs = nn.ModuleList()
         block_in, block_out = 0, 0

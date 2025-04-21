@@ -1,4 +1,5 @@
 .dropbox
+artifacts
 .ipynb_checkpoints
 auto
 wandb

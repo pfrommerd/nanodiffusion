@@ -1,15 +1,16 @@
+from math import e
 import numpy as np
 import torch
 import pandas as pd
 import matplotlib.pyplot as plt
-from torch.utils.data import Dataset, DataLoader
+import typing as ty
 import plotly.tools as tls
 
-from . import Sample, DataConfig, SampleDataset
-
-from nanoconfig.experiment import Figure
-
+from torch.utils.data import Dataset, DataLoader
+from nanoconfig.experiment import Figure, Experiment
 from nanoconfig import config, experiment
+
+from . import Sample, DataConfig, SampleDataset
 
 @config(variant="tree")
 class TreeDataConfig(DataConfig):
@@ -17,7 +18,7 @@ class TreeDataConfig(DataConfig):
     depth: int = 3
     num_samples_per_path: int = 60
 
-    def create(self) -> tuple[SampleDataset, SampleDataset]:
+    def create(self, experiment : Experiment | None = None) -> tuple[SampleDataset, SampleDataset]:
         """
         Create the tree dataset from the config.
         :return: The dataset.
@@ -25,12 +26,14 @@ class TreeDataConfig(DataConfig):
         train_data = TreeDataset(
             branching_factor=self.branching_factor,
             depth=self.depth,
-            num_samples_per_path=self.num_samples_per_path
+            num_samples_per_path=self.num_samples_per_path,
+            experiment=experiment
         )
         test_data = TreeDataset(
             branching_factor=self.branching_factor,
             depth=self.depth,
-            num_samples_per_path=self.num_samples_per_path
+            num_samples_per_path=self.num_samples_per_path,
+            experiment=experiment
         )
         return train_data, test_data
 
@@ -58,7 +61,8 @@ def interpolate_polyline(points, num_samples):
     return np.array(samples)
 
 class TreeDataset(SampleDataset):
-    def __init__(self, branching_factor=4, depth=3, num_samples_per_path=60):
+    def __init__(self, branching_factor=4, depth=3, num_samples_per_path=60,
+                 seed=42, experiment=None):
         """
         Initializes a tree dataset where each leaf of the tree lies on the
         circle of radius 1. The tree is constructed with the given branching_factor
@@ -71,6 +75,12 @@ class TreeDataset(SampleDataset):
                         Total leaves = branching_factor ** depth.
          - num_samples_per_path (int): number of points sampled along each path.
         """
+        super().__init__({
+            'branching_factor': branching_factor,
+            'depth': depth,
+            'num_samples_per_path': num_samples_per_path,
+            'experiment': experiment
+        }, seed, experiment)
         self.branching_factor = branching_factor
         self.depth = depth
         self.num_samples_per_path = num_samples_per_path
@@ -79,15 +89,20 @@ class TreeDataset(SampleDataset):
         # Iterate over each leaf index
         samples = []
         labels = []
+        self.samples = torch.tensor(samples, dtype=torch.float32)
+        self.labels = torch.tensor(labels, dtype=torch.int)
+
+    def generate(self, seed) -> ty.Iterator[Sample]:
+        np.random.seed(seed)
         for i in range(self.total_leaves):
             # Build the sequence of nodes along the path from the root to this leaf.
             # Start with the root at (0, 0)
             path_points = [np.array([0.0, 0.0])]
 
             # For each level l (1 to depth), compute the branch node.
-            for l in range(1, depth + 1):
+            for l in range(1, self.depth + 1):
                 # Group size for this level (leaves per branch node)
-                group_size = branching_factor ** (depth - l)  # For l == depth, group_size == 1.
+                group_size = self.branching_factor ** (self.depth - l)  # For l == depth, group_size == 1.
                 # A_l is the branch index for level l
                 A_l = i // group_size
                 # Compute the average index for all leaves under this branch node
@@ -95,21 +110,14 @@ class TreeDataset(SampleDataset):
                 # Compute angular coordinate (all leaves are uniformly spaced on the circle)
                 theta = avg_index * (2 * np.pi / self.total_leaves)
                 # Set radius proportional to the level (leaf at level==depth has r==1)
-                r = l / depth
+                r = l / self.depth
                 p = np.array([r * np.cos(theta), r * np.sin(theta)])
                 path_points.append(p)
 
             # Sample points uniformly along the polyline defined by the path
-            samples.extend(interpolate_polyline(path_points, num_samples_per_path))
-            labels.extend([i] * num_samples_per_path)
-        samples = np.array(samples)
-        labels = np.array(labels)
-        self.samples = torch.tensor(samples, dtype=torch.float32)
-        self.labels = torch.tensor(labels, dtype=torch.int)
-
-    @property
-    def in_memory(self) -> bool:
-        return True
+            samples = interpolate_polyline(path_points, self.num_samples_per_path)
+            for s in samples:
+                yield Sample(cond=torch.tensor(i, dtype=torch.long), sample=s)
 
     def visualize_batch(self, samples: Sample):
         cond = samples.cond.cpu().numpy() if samples.cond is not None else None

@@ -1,6 +1,7 @@
 import abc
 import torch
 import typing as ty
+import json
 
 from torch.utils.data._utils.collate import collate # type: ignore
 from torch.utils.data import Dataset
@@ -8,7 +9,9 @@ from torch.utils.data import Dataset
 from dataclasses import dataclass
 
 from nanoconfig import config
-from nanoconfig.experiment import NestedResult
+from nanoconfig.experiment import NestedResult, Experiment
+
+T = ty.TypeVar('T')
 
 @dataclass
 class Sample:
@@ -25,13 +28,53 @@ class Sample:
         return Sample(cond, sample, self.num_classes)
 
 class SampleDataset(Dataset, ty.Sized, abc.ABC):
+    def __init__(self, config, seed, experiment : None | Experiment):
+        self.config = config
+        self.seed = seed
+        self.experiment = experiment
+        self.data = None
+
+    def _populate(self):
+        self.data = list(self.generate(self.seed))
+        # name = type(self).__name__.lower()
+        # if self.experiment is not None:
+        #     artifact_id = self.experiment.find_artifact(f"dataset_{name}", type="dataset")
+        #     if not artifact_id:
+        #         self.data = list(self.generate(self.seed))
+        #         with self.experiment.create_artifact(f"dataset_{name}", type="dataset") as builder:
+        #             artifact = builder.build()
+        #     else:
+        #         artifact = self.experiment.use_artifact(artifact_id)
+        # else:
+
+    def __hash__(self):
+        d = json.dumps(self.config, sort_keys=True)
+        return hash((type(self), self.seed, d))
+
+    def __getitem__(self, index) -> Sample:
+        if self.data is None:
+            self._populate()
+        assert self.data is not None
+        return self.data[index]
+
+    def __len__(self) -> int:
+        if self.data is None:
+            self._populate()
+        assert self.data is not None
+        return len(self.data)
+
+    # Generate the data
+    @abc.abstractmethod
+    def generate(self, seed : int) -> ty.Iterator[Sample]:
+        pass
+
     @abc.abstractmethod
     def visualize_batch(self, samples: Sample) -> NestedResult:
         pass
 
     @property
     def in_memory(self) -> bool:
-        return False
+        return True
 
 # When we collate a batch of samples, we need to
 # keep the num_classes the same
@@ -50,4 +93,4 @@ torch.utils.data._utils.collate.default_collate_fn_map.update({ # type: ignore
 @config
 class DataConfig(abc.ABC):
     @abc.abstractmethod
-    def create(self) -> tuple[SampleDataset, SampleDataset]: ...
+    def create(self, experiment : Experiment | None = None) -> tuple[SampleDataset, SampleDataset]: ...
