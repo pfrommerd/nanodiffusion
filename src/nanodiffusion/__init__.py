@@ -1,12 +1,10 @@
 import warnings
-
-from numpy import c_
 warnings.filterwarnings("ignore", category=SyntaxWarning)
 
 import logging
 
-from accelerate import Accelerator
 from pathlib import Path
+from accelerate import Accelerator
 
 from .utils import setup_logging
 
@@ -54,7 +52,6 @@ def _run_experiment(experiment: Experiment):
 
 def train():
     setup_logging()
-    logger.info("Training...")
     default = TrainConfig(
         diffuser=DiffuserConfig(
             schedule=LogLinearScheduleConfig(

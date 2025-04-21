@@ -3,6 +3,7 @@
 auto
 wandb
 __marimo__
+*.swp
 *.aux
 *.blg
 *.bbl
