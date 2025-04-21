@@ -54,6 +54,7 @@ def _run_experiment(experiment: Experiment):
 
 def train():
     setup_logging()
+    logger.info("Training...")
     default = TrainConfig(
         diffuser=DiffuserConfig(
             schedule=LogLinearScheduleConfig(
