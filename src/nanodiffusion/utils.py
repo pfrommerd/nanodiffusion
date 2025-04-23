@@ -23,19 +23,19 @@ from rich.text import Text as RichText
 from pathlib import Path
 
 class Interval:
-    def iterations(self, epoch_steps: int) -> int:
+    def iterations(self, epoch_steps: int | None = None) -> int:
         raise NotImplementedError
 
     @ty.overload
     @staticmethod
-    def to_iterations(interval: Interval | int, epoch_steps: int) -> int: ...
+    def to_iterations(interval: Interval | int, epoch_steps: int | None = None) -> int: ...
 
     @ty.overload
     @staticmethod
-    def to_iterations(interval: None, epoch_steps: int) -> None: ...
+    def to_iterations(interval: None, epoch_steps: int | None = None) -> None: ...
 
     @staticmethod
-    def to_iterations(interval: Interval | int | None, epoch_steps: int) -> int | None:
+    def to_iterations(interval: Interval | int | None, epoch_steps: int | None = None) -> int | None:
         if interval is None: return None
         if isinstance(interval, int): return interval
         return interval.iterations(epoch_steps)
@@ -43,13 +43,15 @@ class Interval:
 class Epochs(Interval):
     def __init__(self, num: int):
         self.num = num
-    def iterations(self, epoch_steps: int) -> int:
+    def iterations(self, epoch_steps: int | None = None) -> int:
+        assert epoch_steps is not None, "Epoch steps must be provided"
         return self.num*epoch_steps
 
 class Iterations(Interval):
     def __init__(self, num: int):
         self.num = num
-    def iterations(self, epoch_steps: int) -> int:
+
+    def iterations(self, epoch_steps: int | None = None) -> int:
         return self.num
 
 def cycle(iterable):

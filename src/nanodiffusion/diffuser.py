@@ -1,4 +1,5 @@
 import logging
+from re import A
 import accelerate
 import torch
 import contextlib
@@ -135,17 +136,22 @@ class Diffuser:
         diffuser.model.load_state_dict(data["model"])
         return diffuser
 
-    def sample(self, N: int = 1, cond: torch.Tensor | None = None, seed: int | None = None,
+    def sample(self, N: int | None = None, cond: torch.Tensor | None = None, seed: int | None = None,
                     accelerator: Accelerator | None = None):
+        N = 16 if N is None and cond is None else (
+            cond.shape[0] if cond is not None and N is None else N
+        )
+        assert N is not None
         accelerator = accelerator or Accelerator()
         model = accelerator.prepare(self.model)
+        model.eval()
         if seed is not None:
             torch.manual_seed(seed)
         if cond is None:
             loader = DataLoader(self.train_data, batch_size=N, shuffle=True) # type: ignore
             cond = next(iter(loader)).cond # type: ignore
             cond = cond.to(accelerator.device) # type: ignore
-            N = min(N, cond.shape[0]) # type: ignore
+            N = min(N, cond.shape[0])
         *_, samples = smalldiffusion.diffusion.samples(
             model, self.schedule.sample_sigmas(self.sample_steps),
             batchsize=N, cond=cond, accelerator=accelerator
@@ -278,7 +284,7 @@ class Diffuser:
                         experiment.log_metric("lr", lr_scheduler.get_last_lr()[0],
                                             series="train", step=iteration)
                     with torch.no_grad():
-                        self.model.eval()
+                        model.eval()
                         if test_interval and iteration % test_interval == 0 and experiment:
                             test_batch = next(test_loader)
                             x0, cond = test_batch.sample, test_batch.cond
@@ -325,7 +331,7 @@ class Diffuser:
                                 experiment.log({
                                     "samples" : self.train_data.visualize_batch(x0_samples)
                                 }, series="test", step=iteration)
-                        self.model.train()
+                        model.train()
                     iteration += 1
                     if iteration >= iterations:
                         break
@@ -333,3 +339,101 @@ class Diffuser:
                     pbar.update(epochs_task, advance=1) # type: ignore
                 if iteration >= iterations:
                     break
+
+    def distill(self, teacher: "Diffuser",
+              iterations : Interval | int | None = None, *,
+              accelerator : Accelerator | None = None,
+              experiment: Experiment | None = None,
+              generate_interval : Interval | int | None = None,
+              test_interval: Interval | int | None = None,
+              progress : bool = False):
+        assert self.train_data is not None, "No train data provided"
+        assert self.test_data is not None, "No test data provided"
+
+        iterations = iterations if iterations is not None else self.total_iterations
+        generate_interval = generate_interval if generate_interval is not None else self.gen_interval
+        test_interval = test_interval if test_interval is not None else self.test_interval
+        assert iterations is not None, "No iterations provided"
+        iterations = Interval.to_iterations(iterations, None)
+        generate_interval = Interval.to_iterations(generate_interval, None)
+        test_interval = Interval.to_iterations(test_interval, None)
+        accelerator = accelerator if accelerator else Accelerator()
+
+        # Find the upper and lower bounds for the conditioning
+        cond_min, cond_max = None, None
+        if self.data_sample.cond is not None and \
+                self.data_sample.num_classes is None:
+            num_workers = os.cpu_count()
+            if num_workers is None: num_workers = 0
+            if self.train_data.in_memory:
+                num_workers = 0
+            logger.info("Computing conditioning bounds...")
+            for data in DataLoader(self.train_data, num_workers=num_workers,
+                                    batch_size=self.batch_size):
+                assert data.cond is not None
+                (batch_min, _), (batch_max, _) = torch.min(data.cond, dim=0), torch.max(data.cond, dim=0)
+                if cond_min is None or cond_max is None:
+                    cond_min, cond_max = batch_min, batch_max
+                else:
+                    cond_min = torch.minimum(cond_min, batch_min)
+                    cond_max = torch.maximum(cond_max, batch_max)
+            assert cond_min is not None and cond_max is not None
+            cond_min, cond_max = cond_min.to(accelerator.device), cond_max.to(accelerator.device)
+            logger.info("Computed bounds.")
+
+        (model, optimizer, lr_scheduler) = accelerator.prepare(
+            self.model, self.optimizer, self.lr_scheduler,
+        )
+        total_params = sum(param.numel() for param in model.parameters())
+        if progress:
+            pbar = Progress(
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(finished_style=RichStyle(color="green")),
+                MofNColumn(6),
+                TaskProgressColumn(), TimeRemainingColumn(),
+                TimeElapsedColumn(), refresh_per_second=1
+            )
+            iterations_task = pbar.add_task(
+                "[bold blue]Total Iterations[/bold blue]",
+                total=iterations)
+        else: pbar = contextlib.nullcontext()
+
+        data_queue = []
+        def generate_data(batch_size):
+            if not data_queue:
+                gen_batch_size = 8*batch_size
+                with torch.no_grad():
+                    if self.data_sample.cond is not None:
+                        cond = torch.randn((gen_batch_size,) + tuple(self.data_sample.cond.shape), device=accelerator.device)
+                        cond = cond*(cond_max - cond_min) + cond_min # type: ignore
+                    else:
+                        cond = None
+                    x0_samples = teacher.sample(gen_batch_size, cond=cond).sample
+                    cond = cond.reshape(8, batch_size, *cond.shape[1:]) if cond is not None else None
+                    x0_samples = x0_samples.reshape(8, batch_size, *x0_samples.shape[1:])
+                    for i in range(8):
+                        bc = cond[i] if cond is not None else None
+                        bs = x0_samples[i]
+                        data_queue.append((bc, bs))
+            return data_queue.pop()
+
+        with pbar:
+            model.train()
+            for iteration in range(iterations):
+                cond, x0 = generate_data(self.batch_size)
+                x0, sigma, eps, _ = smalldiffusion.diffusion.generate_train_sample(
+                    x0, self.schedule # type: ignore
+                )
+                loss = model.get_loss(x0, sigma, eps, cond=cond)
+                optimizer.zero_grad()
+                loss = model.get_loss(x0, sigma, eps, cond=cond)
+                accelerator.backward(loss)
+                optimizer.step()
+                lr_scheduler.step()
+                if experiment:
+                    experiment.log_metric("loss", loss.item(),
+                                        series="train", step=iteration)
+                    experiment.log_metric("lr", lr_scheduler.get_last_lr()[0],
+                                        series="train", step=iteration)
+                if progress:
+                    pbar.advance(iterations_task) # type: ignore

@@ -22,7 +22,8 @@ dependencies = [
 ]
 
 [project.scripts]
-train = "nanodiffusion:train"
+train = "nanodiffusion.train:main"
+distill = "nanodiffusion.distill:main"
 
 [dependency-groups]
 dev = [
