@@ -27,11 +27,10 @@ from dataclasses import replace
 from nanogen import train
 
 from .data import DataPoint
-from .models import DiffusionModel, ModelConfig
+from .models import GenerativeModel, ModelConfig
 
 from .utils import Interval, Iterations
 from .optimizers import OptimizerConfig
-from .schedules import ScheduleConfig
 from . import utils, io
 
 from nanoconfig.experiment import Experiment
@@ -48,14 +47,11 @@ from .utils import MofNColumn
 logger = logging.getLogger(__name__)
 
 @config
-class DiffuserConfig(Config):
-    optimizer : OptimizerConfig
-    schedule : ScheduleConfig
+class PipelineConfig(Config):
     model: ModelConfig
-
-    # Aliases or shas of the different datasets to use
-    data: list[str]
-
+    optimizer : OptimizerConfig
+    # Aliases or sha of the different datasets to use
+    data: str
     batch_size: int = 32
     test_batch_size: int = 64
     gen_batch_size: int = 64
@@ -68,15 +64,16 @@ class DiffuserConfig(Config):
 
 T = ty.TypeVar("T", bound=DataPoint)
 
-class Diffuser(ty.Generic[T]):
-    def __init__(self, config: DiffuserConfig,
-            model : DiffusionModel,
-            ############## If we are training ############
+class GenerativePipeline(ty.Generic[T]):
+    def __init__(self,
+            config: PipelineConfig,
+            model : GenerativeModel,
+            datapoint: T, *,
+            ############## The training informaiton ############
             optimizer : Optimizer | None = None,
-            lr_scheduler: LRScheduler | None = None, *,
+            lr_scheduler: LRScheduler | None = None,
             train_data: SizedDataset[T] | None = None,
             test_data: SizedDataset[T] | None = None,
-            datapoint: T,
             ############## Default training parameters ##############
             batch_size : int = 32,
             test_batch_size : int = 64,
@@ -104,10 +101,10 @@ class Diffuser(ty.Generic[T]):
         self.gen_batch_size = gen_batch_size
 
     @staticmethod
-    def from_config(config: DiffuserConfig,
+    def from_config(config: PipelineConfig,
                 create_optimizer: bool = True,
                 data_adapter: TorchAdapter[T] | None = None,
-                data_repo: DataRepository | None = None) -> "Diffuser[T]":
+                data_repo: DataRepository | None = None) -> "GenerativePipeline[T]":
         if data_repo is None:
             data_repo = DataRepository.default()
         if data_adapter is None:
@@ -123,25 +120,18 @@ class Diffuser(ty.Generic[T]):
         test_data = data.split("test", data_adapter)
         assert train_data is not None
         datapoint = next(iter(train_data))
-
-        train_schedule = config.schedule.create()
-        gen_schedule = Schedule(train_schedule.sample_sigmas(config.sample_steps))
-
-        model = config.model.create(datapoint, train_schedule, gen_schedule)
+        model = config.model.create(datapoint)
         optimizer, lr_scheduler = config.optimizer.create(model.parameters(), config.iterations) if create_optimizer else (None, None)
-        schedule = config.schedule.create()
-        return Diffuser(
-            config, model,
-            optimizer, lr_scheduler,
-            datapoint=datapoint,
+        return GenerativePipeline(
+            config, model, datapoint,
+            optimizer=optimizer, lr_scheduler=lr_scheduler,
             train_data=train_data, test_data=test_data,
             batch_size=config.batch_size, test_interval=config.test_interval,
             gen_interval=config.gen_interval, test_batch_size=config.test_batch_size,
             gen_batch_size=config.gen_batch_size, total_iterations=config.iterations,
         )
 
-
-    def to_config(self) -> DiffuserConfig:
+    def to_config(self) -> PipelineConfig:
         return self.config
 
     def save(self, file, save_optim_state: bool = False):
@@ -153,12 +143,13 @@ class Diffuser(ty.Generic[T]):
         io.save(file, data)
 
     @staticmethod
-    def load(file, load_optim_state: bool = False, device="cpu"):
+    def load(file, load_optim_state: bool = False,
+                device: str = "cpu"):
         data = io.load(file, device=device)
-        config = DiffuserConfig.from_dict(data["config"])
-        diffuser = Diffuser.from_config(config)
-        diffuser.model.load_state_dict(data["model"])
-        return diffuser
+        config = PipelineConfig.from_dict(data["config"])
+        pipeline = GenerativePipeline.from_config(config)
+        pipeline.model.load_state_dict(data["model"])
+        return pipeline
 
     def generate(self, N: int | None = None, cond: torch.Tensor | None = None,
                     seed: int | None = None, accelerator: Accelerator | None = None,
@@ -166,7 +157,7 @@ class Diffuser(ty.Generic[T]):
         if N is None:
             N = 16 if cond is None else utils.axis_size(cond, 0)
         accelerator = accelerator or Accelerator()
-        model : DiffusionModel = accelerator.prepare(self.model)
+        model : GenerativeModel = accelerator.prepare(self.model)
         model.eval()
 
         if cond is None:
@@ -218,15 +209,13 @@ class Diffuser(ty.Generic[T]):
 
         (
             model, optimizer, lr_scheduler,
-            # train_loader, test_loader,
-            # test_gen_loader, train_gen_loader
+            train_loader, test_loader,
+            test_gen_loader, train_gen_loader
         ) = accelerator.prepare(
             self.model, self.optimizer, self.lr_scheduler,
-            # train_loader, test_loader,
-            # test_gen_loader, train_gen_loader
+            train_loader, test_loader,
+            test_gen_loader, train_gen_loader
         )
-        model : DiffusionModel = model
-
         test_loader = utils.cycle(test_loader)
         if test_gen_loader is not None and train_gen_loader is not None:
             test_gen_loader = utils.cycle(test_gen_loader)
@@ -276,7 +265,7 @@ class Diffuser(ty.Generic[T]):
                         x0, cond = batch.sample, batch.cond
                         x0, cond = x0.to(accelerator.device), (cond.to(accelerator.device) if cond is not None else None)
                     optimizer.zero_grad()
-                    loss = model.loss(x0, cond=cond)
+                    loss, metrics = model.loss(x0, cond=cond)
                     accelerator.backward(loss)
                     optimizer.step()
                     lr_scheduler.step()
@@ -287,8 +276,8 @@ class Diffuser(ty.Generic[T]):
                         pbar.update(epoch_iterations_task, advance=1) # type: ignore
 
                     if experiment:
-                        experiment.log_metric("loss", loss.item(),
-                                            series="train", step=iteration)
+                        experiment.log(metrics, series="train", step=iteration)
+                        experiment.log_metric("loss", loss, series="train", step=iteration)
                         experiment.log_metric("lr", lr_scheduler.get_last_lr()[0],
                                             series="train", step=iteration)
                     with torch.no_grad():
@@ -297,10 +286,11 @@ class Diffuser(ty.Generic[T]):
                             test_batch = next(test_loader)
                             x0, cond = test_batch.sample, test_batch.cond
                             x0, cond = x0.to(accelerator.device), (cond.to(accelerator.device) if cond is not None else None)
-                            loss = model.loss(x0, cond=cond)
+                            loss, metrics = model.loss(x0, cond=cond)
+                            metrics["loss"] = loss
                             if experiment:
-                                experiment.log_metric("loss", loss.item(),
-                                                      series="test", step=iteration)
+                                experiment.log(metrics, series="test", step=iteration)
+                                experiment.log_metric("loss", loss, series="test", step=iteration)
                         if generate_interval and iteration % generate_interval == 0 and experiment:
                             if self.datapoint.has_cond:
                                 train_cond = next(train_gen_loader).to(accelerator.device).cond # type: ignore
@@ -323,7 +313,7 @@ class Diffuser(ty.Generic[T]):
                 if iteration >= iterations:
                     break
 
-    def distill(self, teacher: "Diffuser",
+    def distill(self, teacher: "GenerativePipeline",
               iterations : Interval | int | None = None, *,
               accelerator : Accelerator | None = None,
               experiment: Experiment | None = None,

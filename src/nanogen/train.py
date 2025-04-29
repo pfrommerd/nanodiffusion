@@ -3,26 +3,28 @@ warnings.filterwarnings("ignore", category=SyntaxWarning)
 
 import logging
 
+
 from pathlib import Path
 from accelerate import Accelerator
 
 from .utils import setup_logging
-
-from .diffuser import Diffuser, DiffuserConfig
+from .pipeline import GenerativePipeline, PipelineConfig
 from .optimizers import AdamwConfig
-from .schedules import LogLinearScheduleConfig
+
+from .models.diffusion import DiffusionModelConfig
+from .models.diffusion.schedules import LogLinearScheduleConfig
+from .models.diffusion import mlp as diffusion_mlp
 
 from nanoconfig import config, field
 from nanoconfig.options import Options
 from nanoconfig.experiment import Experiment, ExperimentConfig
 
-from .models import mlp, unet1d
 
 logger = logging.getLogger(__name__)
 
 @config
 class TrainConfig:
-    diffuser: DiffuserConfig = field(flat=True)
+    pipeline: PipelineConfig = field(flat=True)
     experiment: ExperimentConfig = field(flat=True)
     final_checkpoint: bool = True
     cpu: bool = False
@@ -38,9 +40,9 @@ def _run_experiment(experiment: Experiment):
     # on the remote server
     setup_logging()
     config : TrainConfig = experiment.config # type: ignore
-    diffuser = Diffuser.from_config(config.diffuser)
+    pipeline = GenerativePipeline.from_config(config.pipeline)
     a = Accelerator(cpu=config.cpu)
-    diffuser.train(
+    pipeline.train(
         progress=True,
         experiment=experiment,
         accelerator=a
@@ -48,17 +50,22 @@ def _run_experiment(experiment: Experiment):
     if config.final_checkpoint:
         with experiment.create_artifact("diffuser", type="model") as builder:
             with builder.create_file("model.safetensors") as f:
-                diffuser.save(f)
-    return diffuser
+                pipeline.save(f)
+    return pipeline
 
 def main():
     setup_logging()
     default = TrainConfig(
-        diffuser=DiffuserConfig(
-            schedule=LogLinearScheduleConfig(
-                timesteps=256,
-                sigma_min=0.001,
-                sigma_max=20
+        pipeline=PipelineConfig(
+            model=DiffusionModelConfig(
+                nn=diffusion_mlp.MlpConfig(
+                    hidden_features=(64, 64, 128, 128, 64, 64),
+                    cond_embed_features=64
+                ),
+                schedule=LogLinearScheduleConfig(
+                    timesteps=100, sigma_min=1e-4, sigma_max=10
+                ),
+                sample_timesteps=100
             ),
             optimizer=AdamwConfig(
                 lr=1e-4,
@@ -66,11 +73,7 @@ def main():
                 betas=(0.9, 0.999),
                 eps=1e-8
             ),
-            data=["trajectory"],
-            model=mlp.MlpConfig(
-                hidden_features=(64, 64, 128, 128, 64, 64),
-                cond_embed_features=64
-            ),
+            data="trajectory",
             gen_batch_size=512,
             batch_size=512,
             test_batch_size=512,

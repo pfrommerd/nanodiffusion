@@ -29,6 +29,12 @@ CondValue = dict[str, torch.Tensor | DiscreteLabel] | torch.Tensor | DiscreteLab
 SampleValue = dict[str, torch.Tensor] | torch.Tensor
 
 class DataPoint(abc.ABC):
+    def to(self, device: torch.device) -> ty.Self:
+        return pytree.tree_map(
+            lambda x: x.to(device) if isinstance(x, torch.Tensor) else x,
+            self
+        )
+
     @property
     def has_cond(self) -> bool:
         return self.cond is not None
@@ -45,9 +51,6 @@ class DataPoint(abc.ABC):
 
     @abc.abstractmethod
     def visualize(self) -> NestedResult: ...
-
-    @abc.abstractmethod
-    def to(self, device: torch.device) -> ty.Self: ...
 
     @staticmethod
     @abc.abstractmethod

@@ -5,47 +5,36 @@ import math
 import itertools
 import torch.utils._pytree as pytree
 
-from smalldiffusion import Schedule, CondEmbedderLabel, get_sigma_embeds
+from smalldiffusion import (
+    Schedule, CondEmbedderLabel, get_sigma_embeds
+)
 
+from nanogen.data import DiscreteLabel
 from nanoconfig import config
-from nanogen.diffuser import Diffuser
 
-from . import ModelConfig, DiffusionModel, DataPoint
-from ..data import DiscreteLabel
+from . import Diffuser, DiffuserConfig
 
 @config(variant="mlp")
-class MlpConfig(ModelConfig):
-    sigma_min : float = 0.01
-    sigma_max : float = 10
-
+class MlpConfig(DiffuserConfig):
     hidden_features : ty.Sequence[int] = (64, 64, 128, 128, 64, 64)
     cond_embed_features : int = 4
 
-    def create(self, datapoint: DataPoint,
-                train_schedule: Schedule,
-                gen_schedule: Schedule) -> DiffusionModel:
-        sample_structure = datapoint.sample
-        cond_structure = datapoint.cond
-
+    @ty.override
+    def create(self, sample_structure, cond_structure) -> Diffuser:
         return DiffusionMLP(
             sample_structure, cond_structure,
-            train_schedule, gen_schedule,
             cond_embed_features=self.cond_embed_features,
             hidden_features=self.hidden_features,
         )
 
-class DiffusionMLP(DiffusionModel):
+class DiffusionMLP(Diffuser):
     def __init__(self, sample_structure, cond_structure,
-                    train_noise_schedule, gen_noise_schedule,
                     cond_embed_features: int = 64,
                     hidden_features=(128,128,256,128,128),
                     num_classes=None):
-        super().__init__(sample_structure, cond_structure,
-                        train_noise_schedule, gen_noise_schedule)
-        #
+        super().__init__()
         sample_flat : list[torch.Tensor] = pytree.tree_leaves(sample_structure)
         cond_flat : list[torch.Tensor | DiscreteLabel] = pytree.tree_leaves(cond_structure)
-
         cond_classes = [x.num_classes for x in cond_flat if isinstance(x, DiscreteLabel)]
         cond_features = [x.nelement() for x in cond_flat if not isinstance(x, DiscreteLabel)]
         num_sample_features = sum(x.nelement() for x in sample_flat)
