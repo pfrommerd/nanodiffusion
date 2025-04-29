@@ -17,5 +17,5 @@ uv run train
 ```
 
 
-[build-img]:https://github.com/pfrommerd/nanodiffusion/workflows/pytest-uv/badge.svg
-[build-url]:https://github.com/pfrommerd/nanodiffusion/actions?query=workflow%3Apytest-uv
+[build-img]:https://github.com/pfrommerd/nanogen/workflows/pytest-uv/badge.svg
+[build-url]:https://github.com/pfrommerd/nanogen/actions?query=workflow%3Apytest-uv

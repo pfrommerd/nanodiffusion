@@ -6,30 +6,30 @@ app = marimo.App(width="medium")
 
 @app.cell
 def _():
-    import nanodiffusion
-    from nanodiffusion import TrainConfig, DiffuserConfig, ExperimentConfig
+    import nanogen
+    from nanogen import TrainConfig, DiffuserConfig, ExperimentConfig
     import logging
     return (
         DiffuserConfig,
         ExperimentConfig,
         TrainConfig,
         logging,
-        nanodiffusion,
+        nanogen,
     )
 
 
 @app.cell
 def _():
-    from nanodiffusion.optimizers import AdamwConfig
-    from nanodiffusion.schedules import LogLinearScheduleConfig
-    from nanodiffusion.models.mlp import MlpConfig
-    from nanodiffusion.datasets.tree import TreeDataConfig
+    from nanogen.optimizers import AdamwConfig
+    from nanogen.schedules import LogLinearScheduleConfig
+    from nanogen.models.mlp import MlpConfig
+    from nanogen.datasets.tree import TreeDataConfig
     return AdamwConfig, LogLinearScheduleConfig, MlpConfig, TreeDataConfig
 
 
 @app.cell
 def _(logging):
-    logger = logging.getLogger("nanodiffusion")
+    logger = logging.getLogger("nanogen")
     return (logger,)
 
 
@@ -43,7 +43,7 @@ def _(
     TrainConfig,
     TreeDataConfig,
     logger,
-    nanodiffusion,
+    nanogen,
 ):
     config = TrainConfig(
         experiment=ExperimentConfig(clearml=True),
@@ -58,7 +58,7 @@ def _(
             batch_size=1024
         )
     )
-    nanodiffusion.setup_logging()
+    nanogen.setup_logging()
     model = config.run(logger)
     return config, model
 

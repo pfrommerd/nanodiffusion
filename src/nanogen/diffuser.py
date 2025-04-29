@@ -1,12 +1,14 @@
 import logging
-from re import A
 import accelerate
 import torch
+import itertools
 import contextlib
-import os
 import smalldiffusion
 import numpy as np
+import typing as ty
 import time
+
+import torch.utils._pytree as pytree
 
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import Optimizer
@@ -14,9 +16,17 @@ from torch.optim.lr_scheduler import LRScheduler
 
 from accelerate import Accelerator
 from smalldiffusion import Schedule, ModelMixin
-from nanoconfig import config, Config
 
-from .datasets import DataConfig, Sample, SampleDataset
+from nanoconfig import config, Config
+from nanoconfig.data import Data
+from nanoconfig.data.source import DataRepository
+from nanoconfig.data.torch import SizedDataset, TorchAdapter
+
+from dataclasses import replace
+
+from nanogen import train
+
+from .data import DataPoint
 from .models import DiffusionModel, ModelConfig
 
 from .utils import Interval, Iterations
@@ -42,7 +52,9 @@ class DiffuserConfig(Config):
     optimizer : OptimizerConfig
     schedule : ScheduleConfig
     model: ModelConfig
-    data: DataConfig
+
+    # Aliases or shas of the different datasets to use
+    data: list[str]
 
     batch_size: int = 32
     test_batch_size: int = 64
@@ -54,15 +66,17 @@ class DiffuserConfig(Config):
     iterations: int = 10_000
     sample_steps: int = 32
 
-class Diffuser:
+T = ty.TypeVar("T", bound=DataPoint)
+
+class Diffuser(ty.Generic[T]):
     def __init__(self, config: DiffuserConfig,
-            model : DiffusionModel, schedule : Schedule,
+            model : DiffusionModel,
+            ############## If we are training ############
             optimizer : Optimizer | None = None,
             lr_scheduler: LRScheduler | None = None, *,
-            data_sample: Sample,
-            train_data : SampleDataset | None,
-            test_data : SampleDataset | None,
-            sample_steps : int = 32,
+            train_data: SizedDataset[T] | None = None,
+            test_data: SizedDataset[T] | None = None,
+            datapoint: T,
             ############## Default training parameters ##############
             batch_size : int = 32,
             test_batch_size : int = 64,
@@ -76,12 +90,10 @@ class Diffuser:
         self.model = model
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
-        self.schedule = schedule
-        self.sample_steps = sample_steps
 
-        self.data_sample = data_sample
         self.train_data = train_data
         self.test_data = test_data
+        self.datapoint = datapoint
 
         self.test_interval = test_interval
         self.gen_interval = gen_interval
@@ -94,26 +106,38 @@ class Diffuser:
     @staticmethod
     def from_config(config: DiffuserConfig,
                 create_optimizer: bool = True,
-                experiment: Experiment | None = None) -> "Diffuser":
-        train_data, test_data = config.data.create(experiment)
-        sample = next(iter(train_data))
-        model = config.model.create(sample)
+                data_adapter: TorchAdapter[T] | None = None,
+                data_repo: DataRepository | None = None) -> "Diffuser[T]":
+        if data_repo is None:
+            data_repo = DataRepository.default()
+        if data_adapter is None:
+            data_adapter = TorchAdapter()
+            from .data import register_types
+            register_types(data_adapter) # type: ignore
+        data = data_repo.lookup(config.data)
+        if data is None:
+            raise ValueError(f"Data not found: {config.data}")
+        # Set the data to sha256 of the data
+        config = replace(config, data=data.sha256)
+        train_data = data.split("train", data_adapter)
+        test_data = data.split("test", data_adapter)
+        assert train_data is not None
+        datapoint = next(iter(train_data))
+
+        train_schedule = config.schedule.create()
+        gen_schedule = Schedule(train_schedule.sample_sigmas(config.sample_steps))
+
+        model = config.model.create(datapoint, train_schedule, gen_schedule)
         optimizer, lr_scheduler = config.optimizer.create(model.parameters(), config.iterations) if create_optimizer else (None, None)
         schedule = config.schedule.create()
         return Diffuser(
             config, model,
-            schedule, optimizer,
-            lr_scheduler,
-            train_data=train_data,
-            test_data=test_data,
-            data_sample=sample,
-            batch_size=config.batch_size,
-            test_interval=config.test_interval,
-            gen_interval=config.gen_interval,
-            test_batch_size=config.test_batch_size,
-            gen_batch_size=config.gen_batch_size,
-            sample_steps=config.sample_steps,
-            total_iterations=config.iterations,
+            optimizer, lr_scheduler,
+            datapoint=datapoint,
+            train_data=train_data, test_data=test_data,
+            batch_size=config.batch_size, test_interval=config.test_interval,
+            gen_interval=config.gen_interval, test_batch_size=config.test_batch_size,
+            gen_batch_size=config.gen_batch_size, total_iterations=config.iterations,
         )
 
 
@@ -136,27 +160,23 @@ class Diffuser:
         diffuser.model.load_state_dict(data["model"])
         return diffuser
 
-    def sample(self, N: int | None = None, cond: torch.Tensor | None = None, seed: int | None = None,
-                    accelerator: Accelerator | None = None):
-        N = 16 if N is None and cond is None else (
-            cond.shape[0] if cond is not None and N is None else N
-        )
-        assert N is not None
+    def generate(self, N: int | None = None, cond: torch.Tensor | None = None,
+                    seed: int | None = None, accelerator: Accelerator | None = None,
+                    **kwargs) -> T:
+        if N is None:
+            N = 16 if cond is None else utils.axis_size(cond, 0)
         accelerator = accelerator or Accelerator()
-        model = accelerator.prepare(self.model)
+        model : DiffusionModel = accelerator.prepare(self.model)
         model.eval()
-        if seed is not None:
-            torch.manual_seed(seed)
+
         if cond is None:
-            loader = DataLoader(self.train_data, batch_size=N, shuffle=True) # type: ignore
+            loader = self.train_data.loader(batch_size=N, shuffle=True) # type: ignore
             cond = next(iter(loader)).cond # type: ignore
             cond = cond.to(accelerator.device) # type: ignore
-            N = min(N, cond.shape[0])
-        *_, samples = smalldiffusion.diffusion.samples(
-            model, self.schedule.sample_sigmas(self.sample_steps),
-            batchsize=N, cond=cond, accelerator=accelerator
-        )
-        return Sample(cond, samples, num_classes=self.data_sample.num_classes) # type: ignore
+            N = min(N, utils.axis_size(cond, 0))
+
+        _, samples = model.generate(cond, **kwargs)
+        return self.datapoint.from_values(cond, samples) # type: ignore
 
     def train(self, iterations : Interval | int | None = None,
               *,
@@ -182,29 +202,18 @@ class Diffuser:
 
         accelerator = accelerator if accelerator else Accelerator()
 
-        num_workers = os.cpu_count()
-        if num_workers is None: num_workers = 0
-        if (hasattr(self.train_data, "in_memory") and hasattr(self.test_data, "in_memory")
-                and self.train_data.in_memory and self.test_data.in_memory):
-            num_workers = 0
-        train_loader = DataLoader(self.train_data, shuffle=True,
-            num_workers=num_workers, batch_size=self.batch_size)
-        test_loader = DataLoader(self.test_data, shuffle=True,
-            num_workers=num_workers, batch_size=self.test_batch_size)
-        if self.data_sample.cond is not None:
-            train_gen_loader = DataLoader(self.train_data, shuffle=True,
-                num_workers=num_workers, batch_size=self.gen_batch_size)
-            test_gen_loader = DataLoader(self.train_data, shuffle=True,
-                num_workers=num_workers, batch_size=self.gen_batch_size)
+        train_loader = self.train_data.loader(batch_size=self.batch_size, shuffle=True)
+        test_loader = self.test_data.loader(batch_size=self.test_batch_size, shuffle=True)
+        if self.datapoint.has_cond:
+            train_gen_loader = self.train_data.loader(batch_size=self.gen_batch_size, shuffle=True)
+            test_gen_loader = self.test_data.loader(batch_size=self.gen_batch_size, shuffle=True)
         else:
-            train_gen_loader = None
-            test_gen_loader = None
+            train_gen_loader, test_gen_loader  = None, None
 
         if experiment:
-            sample_batch = next(iter(DataLoader(self.test_data, shuffle=True,
-                num_workers=num_workers, batch_size=self.gen_batch_size)))
+            sample_batch : T = next(iter(test_loader))
             experiment.log({
-                "samples" : self.train_data.visualize_batch(sample_batch)
+                "samples" : sample_batch.visualize()
             }, series="gt")
 
         (
@@ -216,6 +225,8 @@ class Diffuser:
             # train_loader, test_loader,
             # test_gen_loader, train_gen_loader
         )
+        model : DiffusionModel = model
+
         test_loader = utils.cycle(test_loader)
         if test_gen_loader is not None and train_gen_loader is not None:
             test_gen_loader = utils.cycle(test_gen_loader)
@@ -264,11 +275,8 @@ class Diffuser:
                     with torch.no_grad():
                         x0, cond = batch.sample, batch.cond
                         x0, cond = x0.to(accelerator.device), (cond.to(accelerator.device) if cond is not None else None)
-                        x0, sigma, eps, _ = smalldiffusion.diffusion.generate_train_sample(
-                            x0, self.schedule
-                        )
                     optimizer.zero_grad()
-                    loss = model.get_loss(x0, sigma, eps, cond=cond)
+                    loss = model.loss(x0, cond=cond)
                     accelerator.backward(loss)
                     optimizer.step()
                     lr_scheduler.step()
@@ -289,49 +297,24 @@ class Diffuser:
                             test_batch = next(test_loader)
                             x0, cond = test_batch.sample, test_batch.cond
                             x0, cond = x0.to(accelerator.device), (cond.to(accelerator.device) if cond is not None else None)
-                            x0, sigma, eps, _ = smalldiffusion.diffusion.generate_train_sample(
-                                x0, self.schedule
-                            )
-                            loss = model.get_loss(x0, sigma, eps, cond=cond)
+                            loss = model.loss(x0, cond=cond)
                             if experiment:
                                 experiment.log_metric("loss", loss.item(),
                                                       series="test", step=iteration)
                         if generate_interval and iteration % generate_interval == 0 and experiment:
-                            if self.data_sample.cond is not None:
-                                train_cond = next(iter(train_gen_loader)).cond # type: ignore
-                                test_cond = next(iter(test_gen_loader)).cond # type: ignore
-                                train_cond, test_cond = train_cond.to(accelerator.device), test_cond.to(accelerator.device)
-                                N_train = train_cond.shape[0]
-                                N_test = test_cond.shape[0]
-                                *_, x0_train = smalldiffusion.diffusion.samples(
-                                    self.model, self.schedule.sample_sigmas(self.sample_steps),
-                                    batchsize=N_train, cond=train_cond, accelerator=accelerator
-                                )
-                                *_, x0_test, = smalldiffusion.diffusion.samples(
-                                    self.model, self.schedule.sample_sigmas(self.sample_steps),
-                                    batchsize=N_test, cond=test_cond, accelerator=accelerator
-                                )
-                                x0_train = Sample(cond=train_cond, sample=x0_train, # type: ignore
-                                    num_classes=self.data_sample.num_classes)
-                                x0_test = Sample(cond=test_cond, sample=x0_test, # type: ignore
-                                    num_classes=self.data_sample.num_classes)
-                                experiment.log({
-                                    "samples" : self.train_data.visualize_batch(x0_train),
-                                }, step=iteration, series="train")
-                                experiment.log({
-                                    "samples" : self.train_data.visualize_batch(x0_test)
-                                }, step=iteration, series="test")
+                            if self.datapoint.has_cond:
+                                train_cond = next(train_gen_loader).to(accelerator.device).cond # type: ignore
+                                test_cond = next(test_gen_loader).to(accelerator.device).cond # type: ignore
+                                _, train_samples = model.generate(train_cond)
+                                _, test_samples = model.generate(test_cond)
+                                train_datapoints : T = self.datapoint.from_values(train_cond, train_samples) # type: ignore
+                                test_datapoints : T = self.datapoint.from_values(test_cond, test_samples) # type: ignore
+                                experiment.log({"samples" : train_datapoints.visualize()}, step=iteration, series="train")
+                                experiment.log({"samples" : test_datapoints.visualize()}, step=iteration, series="test")
                             else:
-                                *_, x0_samples, = smalldiffusion.diffusion.samples(
-                                    self.model, self.schedule.sample_sigmas(self.sample_steps),
-                                    batchsize=self.gen_batch_size, cond=None, accelerator=accelerator
-                                )
-                                x0_samples = Sample(cond=None, sample=x0_samples, # type: ignore
-                                    num_classes=self.data_sample.num_classes)
-                                experiment.log({
-                                    "samples" : self.train_data.visualize_batch(x0_samples)
-                                }, series="test", step=iteration)
-                        model.train()
+                                _, train_samples = model.generate()
+                                train_datapoints : T = self.datapoint.from_values(train_cond, train_samples) # type: ignore
+                                experiment.log({"samples" : train_datapoints.visualize()}, series="test", step=iteration)
                     iteration += 1
                     if iteration >= iterations:
                         break
@@ -361,24 +344,20 @@ class Diffuser:
 
         # Find the upper and lower bounds for the conditioning
         cond_min, cond_max = None, None
-        if self.data_sample.cond is not None and \
-                self.data_sample.num_classes is None:
-            num_workers = os.cpu_count()
-            if num_workers is None: num_workers = 0
-            if self.train_data.in_memory:
-                num_workers = 0
+        if self.datapoint.has_cond:
             logger.info("Computing conditioning bounds...")
-            for data in DataLoader(self.train_data, num_workers=num_workers,
-                                    batch_size=self.batch_size):
-                assert data.cond is not None
-                (batch_min, _), (batch_max, _) = torch.min(data.cond, dim=0), torch.max(data.cond, dim=0)
+            for data in self.train_data.loader(batch_size=self.test_batch_size):
+                cond = data.cond
+                batch_min = pytree.tree_map(lambda x: x.min(dim=0), cond)
+                batch_max = pytree.tree_map(lambda x: x.max(dim=0), cond)
                 if cond_min is None or cond_max is None:
                     cond_min, cond_max = batch_min, batch_max
                 else:
-                    cond_min = torch.minimum(cond_min, batch_min)
-                    cond_max = torch.maximum(cond_max, batch_max)
+                    cond_min = pytree.tree_map(torch.minimum, cond_min, batch_min)
+                    cond_max = pytree.tree_map(torch.maximum, cond_max, batch_max)
             assert cond_min is not None and cond_max is not None
-            cond_min, cond_max = cond_min.to(accelerator.device), cond_max.to(accelerator.device)
+            cond_min, cond_max = pytree.tree_map(lambda x: x.to(accelerator.device),
+                                        (cond_min, cond_max))
             logger.info("Computed bounds.")
 
         (model, optimizer, lr_scheduler) = accelerator.prepare(
@@ -398,35 +377,18 @@ class Diffuser:
                 total=iterations)
         else: pbar = contextlib.nullcontext()
 
-        data_queue = []
-        def generate_data(batch_size):
-            if not data_queue:
-                gen_batch_size = 8*batch_size
-                with torch.no_grad():
-                    if self.data_sample.cond is not None:
-                        cond = torch.randn((gen_batch_size,) + tuple(self.data_sample.cond.shape), device=accelerator.device)
-                        cond = cond*(cond_max - cond_min) + cond_min # type: ignore
-                    else:
-                        cond = None
-                    x0_samples = teacher.sample(gen_batch_size, cond=cond).sample
-                    cond = cond.reshape(8, batch_size, *cond.shape[1:]) if cond is not None else None
-                    x0_samples = x0_samples.reshape(8, batch_size, *x0_samples.shape[1:])
-                    for i in range(8):
-                        bc = cond[i] if cond is not None else None
-                        bs = x0_samples[i]
-                        data_queue.append((bc, bs))
-            return data_queue.pop()
+        def data_generator():
+            while True:
+                cond = pytree.tree_map(
+                    lambda min, max: torch.rand(self.batch_size, *min.shape)*(max - min) + min,
+                    cond_min, cond_max)
+                yield teacher.generate(self.batch_size, cond=cond)
 
         with pbar:
             model.train()
-            for iteration in range(iterations):
-                cond, x0 = generate_data(self.batch_size)
-                x0, sigma, eps, _ = smalldiffusion.diffusion.generate_train_sample(
-                    x0, self.schedule # type: ignore
-                )
-                loss = model.get_loss(x0, sigma, eps, cond=cond)
+            for iteration, batch in enumerate(itertools.islice(data_generator(), iterations)):
                 optimizer.zero_grad()
-                loss = model.get_loss(x0, sigma, eps, cond=cond)
+                loss = model.loss(batch.sample, cond=batch.cond)
                 accelerator.backward(loss)
                 optimizer.step()
                 lr_scheduler.step()

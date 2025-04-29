@@ -10,8 +10,7 @@ from smalldiffusion.model import (
     CondEmbedderLabel
 )
 from nanoconfig import config
-from . import ModelConfig, DiffusionModel
-from ..datasets import Sample
+from . import ModelConfig, DiffusionModel, DataPoint
 
 def Normalize(ch):
     return torch.nn.GroupNorm(num_groups=32, num_channels=ch, eps=1e-6, affine=True)
@@ -216,7 +215,7 @@ class Unet1DConfig(ModelConfig):
     dropout: float = 0.1
     resample_with_conv: bool = True
 
-    def create(self, sample: Sample) -> DiffusionModel:
+    def create(self, sample: DataPoint) -> DiffusionModel:
         embed_features = self.base_channels * self.embed_channel_mult
         cond_features = math.prod(sample.cond.shape) if sample.cond is not None else 0
         return Unet(

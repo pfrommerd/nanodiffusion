@@ -6,8 +6,8 @@ app = marimo.App(width="medium")
 
 @app.cell
 def _():
-    import nanodiffusion
-    from nanodiffusion import TrainConfig, DiffuserConfig, ExperimentConfig
+    import nanogen
+    from nanogen import TrainConfig, DiffuserConfig, ExperimentConfig
     from torch.utils.data import DataLoader
     import logging
     import marimo as mo
@@ -18,16 +18,16 @@ def _():
         TrainConfig,
         logging,
         mo,
-        nanodiffusion,
+        nanogen,
     )
 
 
 @app.cell
 def _():
-    from nanodiffusion.optimizers import AdamwConfig
-    from nanodiffusion.schedules import LogLinearScheduleConfig
-    from nanodiffusion.models.mlp import MlpConfig
-    from nanodiffusion.datasets.trajectory import TrajectoryDataConfig
+    from nanogen.optimizers import AdamwConfig
+    from nanogen.schedules import LogLinearScheduleConfig
+    from nanogen.models.mlp import MlpConfig
+    from nanogen.datasets.trajectory import TrajectoryDataConfig
     return (
         AdamwConfig,
         LogLinearScheduleConfig,
@@ -38,7 +38,7 @@ def _():
 
 @app.cell
 def _(logging):
-    logger = logging.getLogger("nanodiffusion")
+    logger = logging.getLogger("nanogen")
     return (logger,)
 
 
@@ -73,8 +73,8 @@ def _(
 
 
 @app.cell
-def _(config, logger, nanodiffusion):
-    nanodiffusion.setup_logging()
+def _(config, logger, nanogen):
+    nanogen.setup_logging()
     model = config.run(logger)
     samples = model.sample(16, seed=1)
     model.test_data.visualize_batch(samples)

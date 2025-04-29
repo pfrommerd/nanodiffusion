@@ -3,7 +3,6 @@ from nanoconfig.experiment import Experiment, ExperimentConfig
 from nanoconfig.options import Options
 
 from .models import mlp, unet1d
-from .datasets import tree, trajectory
 
 from .utils import setup_logging
 from .diffuser import Diffuser
@@ -56,7 +55,7 @@ def main():
         teacher_artifact=MISSING, # type: ignore
         final_checkpoint=True,
         experiment=ExperimentConfig(
-            project="nanodiffusion",
+            project="nanogen",
             console=True,
             wandb=True,
             console_intervals={

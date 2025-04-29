@@ -1,10 +1,10 @@
 from io import BytesIO
 
-from nanodiffusion.datasets.perlin import PerlinDataConfig
-from nanodiffusion.models.mlp import MlpConfig
-from nanodiffusion.schedules import LogLinearScheduleConfig
-from nanodiffusion.optimizers import AdamwConfig
-from nanodiffusion.diffuser import Diffuser, DiffuserConfig
+from nanogen.datasets.perlin import PerlinDataConfig
+from nanogen.models.mlp import MlpConfig
+from nanogen.schedules import LogLinearScheduleConfig
+from nanogen.optimizers import AdamwConfig
+from nanogen.diffuser import Diffuser, DiffuserConfig
 
 def test_save_load():
     config = DiffuserConfig(

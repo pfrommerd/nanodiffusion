@@ -14,6 +14,7 @@ import safetensors.torch
 import torch
 import numpy as np
 import plotly
+import torch.utils._pytree as pytree
 
 import rich._log_render
 from rich.logging import RichHandler
@@ -21,6 +22,12 @@ from rich.progress import ProgressColumn
 from rich.text import Text as RichText
 
 from pathlib import Path
+
+def axis_size(x: ty.Any, axis: int = 0) -> int:
+    tensors = [x for x in pytree.tree_leaves(x) if hasattr(x, "shape")]
+    N = tensors[0].shape[axis]
+    assert all(t.shape[axis] == N for t in tensors)
+    return N
 
 class Interval:
     def iterations(self, epoch_steps: int | None = None) -> int:
@@ -86,7 +93,7 @@ FORMAT = "%(name)s - %(message)s"
 
 def setup_logging(show_path=False):
     # add_log_level("TRACE", logging.DEBUG - 5)
-    logging.getLogger("nanodiffusion").setLevel(logging.INFO)
+    logging.getLogger("nanogen").setLevel(logging.INFO)
     if rich.get_console().is_jupyter:
         return rich.reconfigure(
             force_jupyter=False,

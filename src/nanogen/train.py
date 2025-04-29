@@ -8,9 +8,6 @@ from accelerate import Accelerator
 
 from .utils import setup_logging
 
-from .datasets.tree import TreeDataConfig
-from .datasets.trajectory import TrajectoryDataConfig
-
 from .diffuser import Diffuser, DiffuserConfig
 from .optimizers import AdamwConfig
 from .schedules import LogLinearScheduleConfig
@@ -19,7 +16,6 @@ from nanoconfig import config, field
 from nanoconfig.options import Options
 from nanoconfig.experiment import Experiment, ExperimentConfig
 
-from .datasets import perlin
 from .models import mlp, unet1d
 
 logger = logging.getLogger(__name__)
@@ -70,7 +66,7 @@ def main():
                 betas=(0.9, 0.999),
                 eps=1e-8
             ),
-            data=TreeDataConfig(),
+            data=["trajectory"],
             model=mlp.MlpConfig(
                 hidden_features=(64, 64, 128, 128, 64, 64),
                 cond_embed_features=64
@@ -81,7 +77,7 @@ def main():
             iterations=50_000
         ),
         experiment=ExperimentConfig(
-            project="nanodiffusion",
+            project="nanogen",
             console=True,
             console_intervals={
                 "train": 100,

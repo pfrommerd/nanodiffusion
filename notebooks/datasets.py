@@ -19,21 +19,21 @@ def _():
 
 @app.cell
 def _(visualize):
-    from nanodiffusion.datasets.tree  import TreeDataConfig
+    from nanogen.datasets.tree  import TreeDataConfig
     visualize(TreeDataConfig(), 2048)
     return
 
 
 @app.cell
 def _(visualize):
-    from nanodiffusion.datasets.trajectory import TrajectoryDataConfig
+    from nanogen.datasets.trajectory import TrajectoryDataConfig
     visualize(TrajectoryDataConfig(), 32)
     return
 
 
 @app.cell
 def _(visualize):
-    from nanodiffusion.datasets.oneway import OnewayDataConfig
+    from nanogen.datasets.oneway import OnewayDataConfig
     visualize(OnewayDataConfig(), 2048)
     return
 
