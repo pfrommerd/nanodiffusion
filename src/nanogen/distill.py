@@ -2,10 +2,9 @@ from nanoconfig import config, field, Config, MISSING
 from nanoconfig.experiment import Experiment, ExperimentConfig
 from nanoconfig.options import Options
 
-from .models import mlp, unet1d
+from nanogen.pipeline import GenerativePipeline
 
 from .utils import setup_logging
-from .diffuser import Diffuser
 
 import logging
 logger = logging.getLogger(__name__)
@@ -32,10 +31,10 @@ def _run(experiment: Experiment):
     artifact = experiment.use_artifact(artifact_id)
     assert artifact is not None
     with artifact.open_file("model.safetensors") as f:
-        teacher = Diffuser.load(f)
+        teacher = GenerativePipeline.load(f)
 
     logger.info("Loaded teacher model")
-    student = Diffuser.from_config(teacher.config)
+    student = GenerativePipeline.from_config(teacher.config)
     # Override batch size if specified
     if config.batch_size is not None:
         student.batch_size = config.batch_size

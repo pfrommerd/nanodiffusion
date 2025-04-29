@@ -26,30 +26,27 @@ class DiffusionModel(GenerativeModel):
     def __init__(self, sample_structure: ty.Any,
             diffuser: "Diffuser",
             train_noise_schedule: Schedule,
-            gen_noise_schedule: Schedule):
+            gen_sigmas: torch.Tensor):
         super().__init__()
         self.diffuser = diffuser
-        self.sample_structure = sample_structure
         self.train_noise_schedule = train_noise_schedule
-        self.gen_noise_schedule = gen_noise_schedule
+        self.register_buffer("gen_sigmas", gen_sigmas)
 
     @torch.no_grad()
-    def generate(self, cond: ty.Any = None,
+    def generate(self, sample_structure: ty.Any, cond: ty.Any = None,
                     gam: float = 1., mu: float = 0.,
                     **kwargs) -> ty.Iterator[SampleValue]:
         was_training = self.training
         self.eval()
+        N = utils.axis_size(cond, 0)
         def gen_rand():
-            return pytree.tree_map(lambda x: (torch.randn_like(x)
-                if hasattr(x, "dtype") and hasattr(x, "shape") else x),
-                    self.sample_structure)
-
+            return pytree.tree_map(lambda x: (torch.randn(x.shape, dtype=x.dtype, device=x.device)
+                if hasattr(x, "dtype") and hasattr(x, "shape") else x), sample_structure)
         xt = gen_rand()
         yield xt # type: ignore
         eps = None
-        self.gen_noise_schedule
-        for (sig, sig_prev) in pairwise(self.gen_noise_schedule.sigmas):
-            eps_prev, eps = pred, self(xt, sig, cond) # type: ignore
+        for (sig, sig_prev) in pairwise(self.gen_sigmas): # type: ignore
+            eps_prev, eps = eps, self.diffuser(xt, sig, cond) # type: ignore
             eps_av = pytree.tree_map(lambda x, y: x*gam + y*(1-gam), eps_prev, eps) \
                 if eps_prev is not None else eps
             sig_p = (sig_prev/sig**mu)**(1/(1-mu)) # sig_prev == sig**mu sig_p**(1-mu)
@@ -59,30 +56,23 @@ class DiffusionModel(GenerativeModel):
         if was_training:
             self.train()
 
-    def loss(self, sample: ty.Any, cond: ty.Any = None, loss_type = nn.MSELoss):
-        is_sample = all(pytree.tree_leaves(pytree.tree_map(
-                (lambda x,y: x.shape == y.shape if hasattr(x, "dtype")
-                    and hasattr(x, "shape") else True), sample, self.sample_structure)))
-        is_batch = all(pytree.tree_leaves(pytree.tree_map(
-                (lambda x,y: (len(x.shape) > 1 and x.shape[1:] == y.shape) if hasattr(x, "dtype")
-                    and hasattr(x, "shape") else True), sample, self.sample_structure)))
-        if not is_sample and not is_batch:
-            raise ValueError("Sample does not match the model input shape.")
-
+    def loss(self, sample: ty.Any, cond: ty.Any = None,
+                    loss_type = nn.MSELoss):
         schedule = self.train_noise_schedule
-        if is_sample: sigma = schedule[torch.randint(0, len(schedule), ())]
-        else: sigma = schedule[torch.randint(0, len(schedule),
-                            (utils.axis_size(sample, 0),))]
         eps = pytree.tree_map(
             lambda x: torch.randn_like(x) if isinstance(x, torch.Tensor) else x,
             sample
         )
-        noised = pytree.tree_map(lambda x: x + sigma * eps, sample)
-        if cond is not None: pred = self(noised, sigma, cond=cond)
-        else: pred = self(noised, sigma)
-        return loss_type()(pred, eps)
+        sigma = schedule[torch.randint(0, len(schedule), (utils.axis_size(sample, 0),))].to(sample.device)
+        noised = pytree.tree_map(
+            lambda x, e: x + sigma.reshape((sigma.shape[0],) + (1,)*(len(e.shape) - 1)) * e,
+            sample, eps
+        )
+        if cond is not None: pred = self.diffuser(noised, sigma, cond=cond)
+        else: pred = self.diffuser(noised, sigma)
+        return loss_type()(pred, eps), {}
 
-class Diffuser(nn.Module, ModelMixin): pass
+class Diffuser(nn.Module): pass
 
 @config
 class DiffuserConfig(abc.ABC):
@@ -90,7 +80,7 @@ class DiffuserConfig(abc.ABC):
     def create(self, sample_structure, cond_structure) -> Diffuser:
         pass
 
-@config
+@config(variant="diffusion")
 class DiffusionModelConfig(ModelConfig):
     nn: DiffuserConfig
     schedule: ScheduleConfig
@@ -101,11 +91,11 @@ class DiffusionModelConfig(ModelConfig):
         sample_structure = datapoint.sample
         cond_structure = datapoint.cond
         train_noise_schedule = self.schedule.create()
-        gen_noise_schedule = Schedule(train_noise_schedule.sample_sigmas(self.sample_timesteps))
+        gen_sigmas = train_noise_schedule.sample_sigmas(self.sample_timesteps) # type: ignore
         diffuser = self.nn.create(sample_structure, cond_structure)
         return DiffusionModel(
             sample_structure,
             diffuser,
             train_noise_schedule,
-            gen_noise_schedule
+            gen_sigmas
         )

@@ -70,7 +70,6 @@ class DiffusionMLP(Diffuser):
 
         cond_labels = [c for c in pytree.tree_leaves(cond) if isinstance(c, DiscreteLabel)]
         cond_features = [c for c in pytree.tree_leaves(cond) if not isinstance(c, DiscreteLabel)]
-
         if cond_labels or cond_features:
             cond = torch.zeros((x_flat.shape[0], self.cond_embed_features),
                                     device=nn_input.device)
@@ -79,10 +78,11 @@ class DiffusionMLP(Diffuser):
             for feature, feature_embed in zip(cond_features, self.cond_feature_embed):
                 cond += feature_embed(feature)
             nn_input = torch.cat([nn_input, cond], dim=1) # type: ignore
+
         x_flat = self.net(nn_input)
         # unflatten the x
         indices = [x.nelement() for x in pytree.tree_leaves(x)]
-        x_leaves = [indices[s:e].reshape(x.shape) # type: ignore
+        x_leaves = [x_flat[s:e].reshape(x.shape) # type: ignore
             for (s, e), x in zip(itertools.pairwise([0] + indices), x_leaves)]
         x_out = pytree.tree_unflatten(x_leaves, treedef)
         return x_out

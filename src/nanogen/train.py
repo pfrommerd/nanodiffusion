@@ -73,7 +73,7 @@ def main():
                 betas=(0.9, 0.999),
                 eps=1e-8
             ),
-            data="trajectory",
+            data="single-maze-trajectory",
             gen_batch_size=512,
             batch_size=512,
             test_batch_size=512,

@@ -10,7 +10,7 @@ import typing as ty
 
 class GenerativeModel(abc.ABC, nn.Module):
     @abc.abstractmethod
-    def generate(self, cond: CondValue | None = None, **kwargs) -> ty.Iterator[SampleValue]:
+    def generate(self, sample_structure: SampleValue, cond: CondValue | None = None, **kwargs) -> ty.Iterator[SampleValue]:
         ...
 
     @abc.abstractmethod

@@ -13,6 +13,7 @@ import torchvision.transforms.functional
 
 from . import utils
 
+from nanoconfig.data import utils as data_utils
 from nanoconfig.data.torch import TorchAdapter
 from nanoconfig.data.visualizer import DataVisualizer
 from nanoconfig.experiment import NestedResult, Figure, Image as ImageResult
@@ -81,18 +82,14 @@ class Trajectory(DataPoint):
 
     @staticmethod
     def from_values(cond: CondValue | None, sample: SampleValue) -> "Trajectory":
-        return Trajectory(cond["start"], cond["end"], sample["points"]) # type: ignore
+        return Trajectory(cond["start"], cond["end"], sample) # type: ignore
 
     @staticmethod
     def from_dataset(dataset: ds.Dataset) -> "ty.Iterator[Trajectory]":
-        T = dataset.schema.field("trajectory").type.list_size
         for batch in dataset.to_batches():
-            start = batch["start"].flatten().to_numpy(zero_copy_only=False)
-            end = batch["end"].flatten().to_numpy(zero_copy_only=False)
-            points = batch["trajectory"].flatten().flatten().to_numpy(zero_copy_only=False)
-            start = torch.from_numpy(start.reshape(-1, 2))
-            end = torch.from_numpy(end.reshape(-1, 2))
-            points = torch.from_numpy(points.reshape(-1, T, 2))
+            start = torch.tensor(data_utils.as_numpy(batch["start"]).copy())
+            end = torch.tensor(data_utils.as_numpy(batch["end"]).copy())
+            points = torch.tensor(data_utils.as_numpy(batch["trajectory"]).copy())
             yield Trajectory(start, end, points)
 
 pytree.register_pytree_node(
@@ -182,6 +179,4 @@ class Visualizer(DataVisualizer):
             for i in range(N):
                 r = pytree.tree_map(lambda x: x[i], batch).visualize()
                 rows.append(r if isinstance(r, dict) else {"data": r})
-                if len(rows) > 200:
-                    break
         return pd.DataFrame(rows)

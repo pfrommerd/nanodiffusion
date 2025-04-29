@@ -62,6 +62,8 @@ maze_generator = DepthFirstGenerator()
 maze_solver = DjikstraSolver()
 
 schema = pa.schema([
+    pa.field("start", pa.list_(pa.float32(), 2)),
+    pa.field("end", pa.list_(pa.float32(), 2)),
     pa.field("trajectory", pa.list_(pa.list_(pa.float32(),2), TRAJECTORY_LENGTH)),
 ], metadata={"mime_type": "parquet/trajectory"})
 
@@ -92,11 +94,15 @@ for split in {"train", "test"}:
         for mn in range(NUM_MAZES):
             logger.info(f"Generating maze: {mn}")
             maze = generate_maze(rng)
+            start = []
+            end = []
             trajectories = []
             for i in range(mn, NUM_TRAJECTORIES, NUM_MAZES):
                 logger.info(f"Generating trajectory: {(i - mn) // NUM_MAZES}")
                 trajectory = generate_trajectory(rng, maze, TRAJECTORY_LENGTH)
+                start.append([trajectory[0,0], trajectory[0,1]])
+                end.append([trajectory[-1,0], trajectory[-1,1]])
                 trajectories.append([[trajectory[i,0].item(), trajectory[i,1].item()] for i in range(len(trajectory))])
-            table = pa.table([trajectories], schema=schema)
+            table = pa.table([start, end, trajectories], schema=schema)
             for batch in table.to_batches():
                 split_writer.write_batch(batch)

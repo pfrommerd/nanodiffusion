@@ -206,7 +206,6 @@ class GenerativePipeline(ty.Generic[T]):
             experiment.log({
                 "samples" : sample_batch.visualize()
             }, series="gt")
-
         (
             model, optimizer, lr_scheduler,
             train_loader, test_loader,
@@ -261,11 +260,8 @@ class GenerativePipeline(ty.Generic[T]):
                 if progress and total_epochs > 1:
                     pbar.reset(epoch_iterations_task) # type: ignore
                 for batch in train_loader:
-                    with torch.no_grad():
-                        x0, cond = batch.sample, batch.cond
-                        x0, cond = x0.to(accelerator.device), (cond.to(accelerator.device) if cond is not None else None)
                     optimizer.zero_grad()
-                    loss, metrics = model.loss(x0, cond=cond)
+                    loss, metrics = model.loss(batch.sample, cond=batch.cond)
                     accelerator.backward(loss)
                     optimizer.step()
                     lr_scheduler.step()
@@ -284,25 +280,23 @@ class GenerativePipeline(ty.Generic[T]):
                         model.eval()
                         if test_interval and iteration % test_interval == 0 and experiment:
                             test_batch = next(test_loader)
-                            x0, cond = test_batch.sample, test_batch.cond
-                            x0, cond = x0.to(accelerator.device), (cond.to(accelerator.device) if cond is not None else None)
-                            loss, metrics = model.loss(x0, cond=cond)
+                            loss, metrics = model.loss(test_batch.sample, cond=test_batch.cond)
                             metrics["loss"] = loss
                             if experiment:
                                 experiment.log(metrics, series="test", step=iteration)
                                 experiment.log_metric("loss", loss, series="test", step=iteration)
                         if generate_interval and iteration % generate_interval == 0 and experiment:
                             if self.datapoint.has_cond:
-                                train_cond = next(train_gen_loader).to(accelerator.device).cond # type: ignore
-                                test_cond = next(test_gen_loader).to(accelerator.device).cond # type: ignore
-                                _, train_samples = model.generate(train_cond)
-                                _, test_samples = model.generate(test_cond)
-                                train_datapoints : T = self.datapoint.from_values(train_cond, train_samples) # type: ignore
-                                test_datapoints : T = self.datapoint.from_values(test_cond, test_samples) # type: ignore
+                                train_batch = next(train_gen_loader).to(accelerator.device) # type: ignore
+                                test_batch = next(test_gen_loader).to(accelerator.device) # type: ignore
+                                *_, train_samples = model.generate(train_batch.sample, train_batch.cond)
+                                *_, test_samples = model.generate(test_batch.sample, test_batch.cond)
+                                train_datapoints : T = self.datapoint.from_values(train_batch.cond, train_samples) # type: ignore
+                                test_datapoints : T = self.datapoint.from_values(test_batch.cond, test_samples) # type: ignore
                                 experiment.log({"samples" : train_datapoints.visualize()}, step=iteration, series="train")
                                 experiment.log({"samples" : test_datapoints.visualize()}, step=iteration, series="test")
                             else:
-                                _, train_samples = model.generate()
+                                *_, train_samples = model.generate()
                                 train_datapoints : T = self.datapoint.from_values(train_cond, train_samples) # type: ignore
                                 experiment.log({"samples" : train_datapoints.visualize()}, series="test", step=iteration)
                     iteration += 1
