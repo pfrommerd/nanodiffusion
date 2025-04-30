@@ -148,10 +148,8 @@ class DiffusionModelConfig(ModelConfig):
         else:
             diffuser = self.nn.create(sample_structure, cond_structure)
         return DiffusionModel(
-            sample_structure,
-            diffuser, # type: ignore
-            train_noise_schedule,
-            gen_sigmas
+            sample_structure, diffuser, # type: ignore
+            train_noise_schedule, gen_sigmas
         )
 
 class CondEmbedder(nn.Module):
