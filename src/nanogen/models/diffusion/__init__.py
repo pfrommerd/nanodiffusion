@@ -1,9 +1,9 @@
 from itertools import pairwise
 
-from smalldiffusion.model import ModelMixin
+from smalldiffusion.model import CondEmbedderLabel
 from nanogen import utils
 
-from nanogen.data import DataPoint, SampleValue, CondValue
+from nanogen.data import DataPoint, SampleValue, CondValue, DiscreteLabel
 from nanogen.models import ModelConfig, GenerativeModel
 
 from nanoconfig import config
@@ -38,7 +38,6 @@ class DiffusionModel(GenerativeModel):
                     **kwargs) -> ty.Iterator[SampleValue]:
         was_training = self.training
         self.eval()
-        N = utils.axis_size(cond, 0)
         def gen_rand():
             return pytree.tree_map(lambda x: (torch.randn(x.shape, dtype=x.dtype, device=x.device)
                 if hasattr(x, "dtype") and hasattr(x, "shape") else x), sample_structure)
@@ -99,3 +98,30 @@ class DiffusionModelConfig(ModelConfig):
             train_noise_schedule,
             gen_sigmas
         )
+
+class CondEmbedder(nn.Module):
+    def __init__(self, cond_structure: ty.Any, embed_features: int):
+        super().__init__()
+        cond_flat : list[torch.Tensor | DiscreteLabel] = pytree.tree_leaves(cond_structure)
+        cond_classes = [x.num_classes for x in cond_flat if isinstance(x, DiscreteLabel)]
+        cond_features = [x.nelement() for x in cond_flat if isinstance(x, torch.Tensor)]
+        self.cond_class_embed = nn.ModuleList([
+            CondEmbedderLabel(embed_features, num_classes, 0.1)
+            for num_classes in cond_classes
+        ])
+        self.cond_feature_embed = nn.ModuleList([
+            nn.Linear(num_cond_features, embed_features)
+            for num_cond_features in cond_features
+        ])
+
+    def forward(self, cond: ty.Any):
+        cond_flat : list[torch.Tensor | DiscreteLabel] = pytree.tree_leaves(cond)
+        cond_labels = [c for c in cond_flat if isinstance(c, DiscreteLabel)]
+        cond_features = [c for c in cond_flat if isinstance(c, torch.Tensor)]
+
+        cond = None
+        for label, label_embed in zip(cond_labels, self.cond_class_embed):
+            cond = (cond + label_embed(label)) if cond is not None else cond
+        for feature, feature_embed in zip(cond_features, self.cond_feature_embed):
+            cond = (cond + feature_embed(feature)) if cond is not None else cond
+        return cond

@@ -13,7 +13,9 @@ from .optimizers import AdamwConfig
 
 from .models.diffusion import DiffusionModelConfig
 from .models.diffusion.schedules import LogLinearScheduleConfig
+
 from .models.diffusion import mlp as diffusion_mlp
+from .models.diffusion import unet as diffusion_unet
 
 from nanoconfig import config, field
 from nanoconfig.options import Options
@@ -26,7 +28,7 @@ logger = logging.getLogger(__name__)
 class TrainConfig:
     pipeline: PipelineConfig = field(flat=True)
     experiment: ExperimentConfig = field(flat=True)
-    final_checkpoint: bool = True
+    final_checkpoint: bool = False
     cpu: bool = False
 
     def run(self, logger):
@@ -59,8 +61,8 @@ def main():
         pipeline=PipelineConfig(
             model=DiffusionModelConfig(
                 nn=diffusion_mlp.MlpConfig(
-                    hidden_features=(64, 64, 128, 128, 64, 64),
-                    cond_embed_features=64
+                    hidden_features=(64, 128, 128, 64, 64),
+                    embed_features=32
                 ),
                 schedule=LogLinearScheduleConfig(
                     timesteps=100, sigma_min=1e-4, sigma_max=10

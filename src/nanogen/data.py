@@ -1,10 +1,13 @@
 import abc
 import pyarrow as pa
+import functools
 import pyarrow.dataset as ds
 import torch.utils.data
 import torch.utils._pytree as pytree
 import typing as ty
 import pandas as pd
+import plotly.graph_objects as go
+import numpy as np
 import json
 import io
 import PIL.Image
@@ -51,12 +54,78 @@ class DataPoint(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def visualize(self) -> NestedResult: ...
+    def to_result(self) -> NestedResult: ...
+
+    # @abc.abstractmethod
+    # def to_dataframe(self) -> pd.DataFrame: ...
 
     @staticmethod
     @abc.abstractmethod
     def from_values(cond: dict[str, torch.Tensor | DiscreteLabel] | torch.Tensor | DiscreteLabel,
         sample: dict[str, torch.Tensor]) -> "DataPoint": ...
+
+@dataclass
+class Planar(DataPoint):
+    cond_: torch.Tensor | None
+    value_: torch.Tensor
+
+    @property
+    def cond(self) -> CondValue | None:
+        return self.cond_
+
+    @property
+    def sample(self) -> SampleValue:
+        return self.value_
+
+    def to_result(self) -> NestedResult:
+        cond = self.cond_.cpu().numpy() if self.cond_ is not None else None
+        value = self.value_.cpu().numpy()
+        if cond is not None: value = np.concatenate((cond,value), axis=-1) # type: ignore
+        x, y, z = None, None, None
+        if value.shape[-1] == 1: x, = value.T
+        elif value.shape[-1] == 2: x, y = value.T
+        elif value.shape[-1] == 3: x, y, z = value.T
+        else: raise ValueError(f"Invalid shape {value.shape}")
+        if x is not None and y is not None or False:
+            return Figure(go.Figure([go.Scatter(x=list(x), y=list(y), mode="markers",
+                    marker_color=z if z is not None else None)]))
+        else:
+            return Figure(go.Figure([go.Histogram(x=list(x))]))
+
+    def to_dataframe(self) -> pd.DataFrame:
+        cond = self.cond_.cpu().numpy() if self.cond_ is not None else None
+        value = self.value_.cpu().numpy()
+        if cond is not None: value = np.concatenate((cond,value), axis=-1) # type: ignore
+        return pd.DataFrame(zip(value.T, ["x", "y", "z"]))
+
+    @staticmethod
+    def from_values(cond: CondValue | None, sample: SampleValue) -> "Planar":
+        assert isinstance(sample, torch.Tensor)
+        assert cond is None or isinstance(cond, torch.Tensor)
+        return Planar(cond, sample)
+
+    @staticmethod
+    def from_dataset(dataset: ds.Dataset) -> "ty.Iterator[Planar]":
+        mime_type = dataset.schema.metadata.get(b"mime_type", "").decode()
+        conditional = mime_type == b"parquet/conditional_planar"
+        has_y = "y" in dataset.schema.names
+        has_z = "z" in dataset.schema.names
+
+        for batches in dataset.to_batches():
+            tensors = []
+            tensors.append(torch.tensor(data_utils.as_numpy(batches["x"]).copy()))
+            if has_y: tensors.append(torch.tensor(data_utils.as_numpy(batches["y"]).copy()))
+            if has_z: tensors.append(torch.tensor(data_utils.as_numpy(batches["z"]).copy()))
+            if conditional: cond = tensors.pop(0)
+            else: cond = None
+            value = torch.stack(tensors, dim=-1)
+            yield Planar(cond, value)
+
+pytree.register_pytree_node(
+    Planar,
+    lambda planar: ([planar.cond_, planar.value_], None),
+    lambda children, _: Planar(children[0], children[1]) # type: ignore
+)
 
 @dataclass
 class Trajectory(DataPoint):
@@ -72,13 +141,9 @@ class Trajectory(DataPoint):
     def sample(self) -> dict[str, torch.Tensor] | torch.Tensor:
         return self.points
 
-    def visualize(self) -> NestedResult:
+    def to_result(self) -> NestedResult:
         fig = None
         return Figure(fig)
-
-    @ty.override
-    def to(self, device: torch.device) -> "Trajectory":
-        return Trajectory(self.start.to(device), self.end.to(device), self.points.to(device))
 
     @staticmethod
     def from_values(cond: CondValue | None, sample: SampleValue) -> "Trajectory":
@@ -97,6 +162,7 @@ pytree.register_pytree_node(
     lambda children, aux: Trajectory(children[0], children[1], children[2]) # type: ignore
 )
 
+
 @dataclass
 class Image(DataPoint):
     image: torch.Tensor
@@ -109,10 +175,7 @@ class Image(DataPoint):
     def sample(self) -> SampleValue:
         return self.image
 
-    def to(self, device: torch.device) -> "Image":
-        return Image(self.image.to(device))
-
-    def visualize(self) -> NestedResult:
+    def to_result(self) -> NestedResult:
         return ImageResult(self.image)
 
     @staticmethod
@@ -168,6 +231,8 @@ def register_types(adapter: TorchAdapter[DataPoint]):
     adapter.register_type("parquet/trajectory", Trajectory.from_dataset)
     adapter.register_type("parquet/image", Image.from_dataset)
     adapter.register_type("parquet/image+label", LabeledImage.from_dataset)
+    adapter.register_type("parquet/planar", Planar.from_dataset)
+    adapter.register_type("parquet/conditional_planar", Planar.from_dataset)
 
 class Visualizer(DataVisualizer):
     def as_dataframe(self, split):

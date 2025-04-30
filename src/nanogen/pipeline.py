@@ -44,6 +44,14 @@ from rich.progress import (
 )
 from .utils import MofNColumn
 
+# Import all of the different models
+# so that they can be deserialized
+
+from .models.diffusion import mlp as diffusion_mlp
+from .models.diffusion import unet as diffusion_unet
+
+#
+
 logger = logging.getLogger(__name__)
 
 @config
@@ -198,13 +206,18 @@ class GenerativePipeline(ty.Generic[T]):
         if self.datapoint.has_cond:
             train_gen_loader = self.train_data.loader(batch_size=self.gen_batch_size, shuffle=True)
             test_gen_loader = self.test_data.loader(batch_size=self.gen_batch_size, shuffle=True)
+            gen_batch = None
         else:
             train_gen_loader, test_gen_loader  = None, None
+            gen_batch = pytree.tree_map(
+                lambda x: torch.repeat_interleave(x[None], self.gen_batch_size, dim=0)
+                    if isinstance(x, torch.Tensor) else x, self.datapoint
+            ).to(accelerator.device)
 
         if experiment:
             sample_batch : T = next(iter(test_loader))
             experiment.log({
-                "samples" : sample_batch.visualize()
+                "samples" : sample_batch.to_result()
             }, series="gt")
         (
             model, optimizer, lr_scheduler,
@@ -293,12 +306,13 @@ class GenerativePipeline(ty.Generic[T]):
                                 *_, test_samples = model.generate(test_batch.sample, test_batch.cond)
                                 train_datapoints : T = self.datapoint.from_values(train_batch.cond, train_samples) # type: ignore
                                 test_datapoints : T = self.datapoint.from_values(test_batch.cond, test_samples) # type: ignore
-                                experiment.log({"samples" : train_datapoints.visualize()}, step=iteration, series="train")
-                                experiment.log({"samples" : test_datapoints.visualize()}, step=iteration, series="test")
+                                experiment.log({"samples" : train_datapoints.to_result()}, step=iteration, series="train")
+                                experiment.log({"samples" : test_datapoints.to_result()}, step=iteration, series="test")
                             else:
-                                *_, train_samples = model.generate()
-                                train_datapoints : T = self.datapoint.from_values(train_cond, train_samples) # type: ignore
-                                experiment.log({"samples" : train_datapoints.visualize()}, series="test", step=iteration)
+                                assert gen_batch is not None
+                                *_, train_samples = model.generate(gen_batch.sample)
+                                train_datapoints : T = self.datapoint.from_values(None, train_samples) # type: ignore
+                                experiment.log({"samples" : train_datapoints.to_result()}, series="test", step=iteration)
                     iteration += 1
                     if iteration >= iterations:
                         break

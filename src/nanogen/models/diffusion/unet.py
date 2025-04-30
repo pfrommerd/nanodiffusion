@@ -10,27 +10,27 @@ from smalldiffusion.model import (
     CondEmbedderLabel
 )
 from nanoconfig import config
-from . import ModelConfig, DiffusionModel, DataPoint
+from . import CondEmbedder, DiffuserConfig, ModelConfig, Diffuser, SampleValue, CondValue
 
 def Normalize(ch):
     return torch.nn.GroupNorm(num_groups=32, num_channels=ch, eps=1e-6, affine=True)
 
-def Upsample(ch):
+def Upsample(ch, Conv):
     return nn.Sequential(
         nn.Upsample(scale_factor=2.0, mode='linear', align_corners=True),
-        torch.nn.Conv1d(ch, ch, kernel_size=3, stride=1, padding=1),
+        Conv(ch, ch, kernel_size=3, stride=1, padding=1),
     )
 
-def Downsample(ch):
+def Downsample(ch, Conv):
     return nn.Sequential(
         nn.ConstantPad1d((0, 1), 0),
-        torch.nn.Conv1d(ch, ch, kernel_size=3, stride=2, padding=0),
+        Conv(ch, ch, kernel_size=3, stride=2, padding=0),
     )
 
 
 class ResnetBlock(nn.Module):
     def __init__(self, *, in_ch, out_ch=None, conv_shortcut=False,
-                 dropout, temb_channels=512):
+                 dropout, temb_channels=512, Conv):
         super().__init__()
         self.in_ch = in_ch
         out_ch = in_ch if out_ch is None else out_ch
@@ -40,7 +40,7 @@ class ResnetBlock(nn.Module):
         self.layer1 = nn.Sequential(
             Normalize(in_ch),
             nn.SiLU(),
-            torch.nn.Conv1d(in_ch, out_ch, kernel_size=3, stride=1, padding=1),
+            Conv(in_ch, out_ch, kernel_size=3, stride=1, padding=1),
         )
         self.temb_proj = nn.Sequential(
             nn.SiLU(),
@@ -50,11 +50,11 @@ class ResnetBlock(nn.Module):
             Normalize(out_ch),
             nn.SiLU(),
             torch.nn.Dropout(dropout),
-            torch.nn.Conv1d(out_ch, out_ch, kernel_size=3, stride=1, padding=1),
+            Conv(out_ch, out_ch, kernel_size=3, stride=1, padding=1),
         )
         if self.in_ch != self.out_ch:
             kernel_stride_padding = (3, 1, 1) if self.use_conv_shortcut else (1, 1, 0)
-            self.shortcut = torch.nn.Conv1d(in_ch, out_ch, *kernel_stride_padding)
+            self.shortcut = Conv(in_ch, out_ch, *kernel_stride_padding)
 
     def forward(self, x, temb):
         h = x
@@ -84,8 +84,8 @@ class AttnBlock(nn.Module):
         h_ = rearrange(h_, 'b l c -> b c l')
         return x + self.proj_out(h_)
 
-class Unet(DiffusionModel):
-    def __init__(self, in_dim, in_ch, out_ch,
+class Unet(Diffuser):
+    def __init__(self, spatial_dims, in_ch, out_ch,
                  ch               = 128,
                  ch_mult          = (1,2,2,2),
                  embed_ch_mult    = 4,
@@ -96,39 +96,48 @@ class Unet(DiffusionModel):
                  sig_embed        = None,
                  cond_embed       = None,
                  ):
-        super().__init__((in_dim, in_ch))
+        super().__init__()
         self.ch = ch
-        self.in_dim = in_dim
         self.in_ch = in_ch
+        self.spatial_dims = spatial_dims
         self.num_resolutions = len(ch_mult)
         self.num_res_blocks = num_res_blocks
         self.temb_ch = self.ch * embed_ch_mult
 
+        if spatial_dims == 1:
+            Conv = nn.Conv1d
+        elif spatial_dims == 2:
+            Conv = nn.Conv2d
+        elif spatial_dims == 3:
+            Conv = nn.Conv3d
+        else:
+            raise ValueError(f"Unsupported spatial dimensions: {spatial_dims}")
+
         # Embeddings
         self.sig_embed = sig_embed or SigmaEmbedderSinCos(self.temb_ch)
         make_block = lambda in_ch, out_ch: ResnetBlock(
-            in_ch=in_ch, out_ch=out_ch, temb_channels=self.temb_ch, dropout=dropout
+            in_ch=in_ch, out_ch=out_ch, temb_channels=self.temb_ch, dropout=dropout, Conv=Conv
         )
         self.cond_embed = cond_embed
 
         # Downsampling
-        curr_res = in_dim
         in_ch_dim = [ch * m for m in (1,)+tuple(ch_mult)]
-        self.conv_in = torch.nn.Conv1d(in_ch, self.ch, kernel_size=3, stride=1, padding=1)
+        self.conv_in = Conv(in_ch, self.ch, kernel_size=3, stride=1, padding=1)
         self.downs = nn.ModuleList()
         block_in, block_out = 0, 0
+        red_factor = 1
         for i, (block_in, block_out) in enumerate(pairwise(in_ch_dim)):
             down = nn.Module()
             down.blocks = nn.ModuleList()
             for _ in range(self.num_res_blocks):
                 block : list = [make_block(block_in, block_out)]
-                if curr_res in attn_resolutions:
+                if red_factor in attn_resolutions:
                     block.append(AttnBlock(block_out))
                 down.blocks.append(CondSequential(*block))
                 block_in = block_out
             if i < self.num_resolutions - 1: # Not last iter
-                down.downsample = Downsample(block_in)
-                curr_res = curr_res // 2
+                down.downsample = Downsample(block_in, Conv=Conv)
+                red_factor *= 2
             self.downs.append(down)
 
         # Middle
@@ -148,30 +157,26 @@ class Unet(DiffusionModel):
                 if i_block == self.num_res_blocks:
                     skip_in = next_skip_in
                 block = [make_block(block_in+skip_in, block_out)]
-                if curr_res in attn_resolutions:
+                if red_factor in attn_resolutions:
                     block.append(AttnBlock(block_out)) # type: ignore
                 up.blocks.append(CondSequential(*block))
                 block_in = block_out
             if i_level < self.num_resolutions - 1: # Not last iter
                 up.upsample = Upsample(block_in) # type: ignore
-                curr_res = curr_res * 2
+                red_factor = red_factor // 2
             self.ups.append(up)
 
         # Out
         self.out_layer = nn.Sequential(
             Normalize(block_in), # type: ignore
             nn.SiLU(),
-            torch.nn.Conv1d(block_in, out_ch, # type: ignore
+            Conv(block_in, out_ch, # type: ignore
                 kernel_size=3, stride=1, padding=1),
         )
 
     def forward(self, x, sigma, cond=None):
-        assert x.ndim == 3
-        assert x.shape[-1] == self.in_ch
-        assert x.shape[-2] == self.in_dim
         # Turn B T C -> B C T
         x = torch.transpose(x, -1, -2)
-        cond = cond.view(cond.shape[0], -1) if cond is not None else None
         # Embeddings
         emb = self.sig_embed(x.shape[0], sigma.squeeze())
         if self.cond_embed is not None:
@@ -205,8 +210,8 @@ class Unet(DiffusionModel):
         out = torch.transpose(out, -1, -2)
         return out
 
-@config(variant="unet1d")
-class Unet1DConfig(ModelConfig):
+@config(variant="unet")
+class UnetConfig(DiffuserConfig):
     base_channels: int = 128
     channel_mults: ty.Sequence[int] = (1, 2, 2, 2)
     embed_channel_mult: int = 4
@@ -215,13 +220,13 @@ class Unet1DConfig(ModelConfig):
     dropout: float = 0.1
     resample_with_conv: bool = True
 
-    def create(self, sample: DataPoint) -> DiffusionModel:
+    def create(self, sample_structure: SampleValue, cond_structure: CondValue) -> Unet:
+        assert isinstance(sample_structure, torch.Tensor), "Can only use Unet for single tensor samples."
         embed_features = self.base_channels * self.embed_channel_mult
-        cond_features = math.prod(sample.cond.shape) if sample.cond is not None else 0
         return Unet(
-            in_dim=sample.sample.shape[-2],
-            in_ch=sample.sample.shape[-1],
-            out_ch=sample.sample.shape[-1],
+            spatial_dims=sample_structure.ndim - 1,
+            in_ch=sample_structure.shape[-1],
+            out_ch=sample_structure.shape[-1],
             ch=self.base_channels,
             ch_mult=self.channel_mults,
             embed_ch_mult=self.embed_channel_mult,
@@ -230,10 +235,5 @@ class Unet1DConfig(ModelConfig):
             dropout=self.dropout,
             resample_with_conv=self.resample_with_conv,
             sig_embed=SigmaEmbedderSinCos(embed_features),
-            cond_embed=(
-                (CondEmbedderLabel(embed_features, sample.num_classes)
-                    if sample.num_classes is not None else
-                nn.Linear(cond_features, embed_features))
-                if sample.cond is not None else None
-            )
+            cond_embed=CondEmbedder(cond_structure, embed_features)
         )
