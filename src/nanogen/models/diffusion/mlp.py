@@ -1,4 +1,5 @@
 import torch.nn as nn
+import torch.nn.functional as F
 import torch
 import typing as ty
 import math
@@ -6,7 +7,7 @@ import itertools
 import torch.utils._pytree as pytree
 
 from smalldiffusion import (
-    Schedule, get_sigma_embeds
+    Schedule, SigmaEmbedderSinCos, get_sigma_embeds
 )
 
 from nanogen.data import DiscreteLabel
@@ -29,33 +30,44 @@ class MlpConfig(DiffuserConfig):
 
 class DiffusionMLP(Diffuser):
     def __init__(self, sample_structure, cond_structure,
-                    embed_features: int = 32,
+                    embed_features: int = 64,
                     hidden_features=(128,128,256,128,128),
                     num_classes=None):
         super().__init__()
         assert isinstance(sample_structure, torch.Tensor), "sample_structure must be a torch.Tensor"
         sample_features = sample_structure.nelement()
-        input_features = 2*embed_features if cond_structure is None else 3*embed_features
-        features = (input_features,) + tuple(hidden_features)
-        layers = []
-        for in_dim, out_dim in itertools.pairwise(features):
-            layers.extend([nn.Linear(in_dim, out_dim), nn.GELU()])
-        layers.append(nn.Linear(features[-1], sample_features))
 
-        self.net = nn.Sequential(*layers)
-        self.sigma_embedder = nn.Linear(2, embed_features)
-        self.sample_embedder = nn.Linear(sample_features, embed_features)
-        self.cond_embedder = CondEmbedder(cond_structure, embed_features)
+        layers = []
+        embed_layers = []
+        features = (sample_features,) + tuple(hidden_features)
+        for in_dim, out_dim in itertools.pairwise(features):
+            layers.append(nn.Linear(in_dim, out_dim))
+            embed_layers.append(nn.Linear(embed_features, 2*out_dim))
+
+        self.layers = nn.ModuleList(layers)
+        self.embed_layers = nn.ModuleList(embed_layers)
+        self.final_layer = nn.Linear(features[-1], sample_features)
+
+        self.sigma_embedder = SigmaEmbedderSinCos(embed_features)
+        self.cond_embedder = nn.Sequential(
+            CondEmbedder(cond_structure, embed_features),
+            nn.GELU(),
+            nn.Linear(embed_features, embed_features)
+        ) if cond_structure is not None else None
 
     def forward(self, x, sigma, cond : torch.Tensor | None = None):
         assert isinstance(x, torch.Tensor), "Input x must be a torch.Tensor"
         out_shape = x.shape
-        x_flat = x.flatten(1)
-        x_embed = self.sample_embedder(x_flat)
-        sigma_embed = self.sigma_embedder(get_sigma_embeds(x_flat.shape[0], sigma.squeeze()))
+
+        embed = self.sigma_embedder(x.shape[0], sigma)
         if cond is not None:
-            cond = self.cond_embedder(cond)
-        nn_input = torch.cat([x_embed, sigma_embed] + ([cond] if cond is not None else []), dim=1)
-        x_flat = self.net(nn_input)
-        x_out = x_flat.reshape(out_shape)
-        return x_out
+            assert self.cond_embedder is not None
+            cond += self.cond_embedder(cond)
+
+        x = x.flatten(1)
+        for (layer, embed_layer) in zip(self.layers, self.embed_layers):
+            x = layer(x)
+            shift, scale = embed_layer(embed).chunk(2, dim=-1)
+            x = F.gelu((scale + 1)*x + shift)
+        x = self.final_layer(x)
+        return x.reshape(out_shape)

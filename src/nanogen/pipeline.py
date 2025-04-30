@@ -127,11 +127,14 @@ class GenerativePipeline(ty.Generic[T]):
         train_data = data.split("train", data_adapter)
         test_data = data.split("test", data_adapter)
         assert train_data is not None
-        datapoint = next(iter(train_data))
-        model = config.model.create(datapoint)
-        optimizer, lr_scheduler = config.optimizer.create(model.parameters(), config.iterations) if create_optimizer else (None, None)
+        model = config.model.create(train_data) # type: ignore
+        if list(model.parameters()):
+            optimizer, lr_scheduler = config.optimizer.create(model.parameters(), config.iterations) if create_optimizer else (None, None)
+        else:
+            logger.warn("Model has no parameters...")
+            optimizer, lr_scheduler = None, None
         return GenerativePipeline(
-            config, model, datapoint,
+            config, model, train_data.data_sample,
             optimizer=optimizer, lr_scheduler=lr_scheduler,
             train_data=train_data, test_data=test_data,
             batch_size=config.batch_size, test_interval=config.test_interval,
@@ -273,11 +276,12 @@ class GenerativePipeline(ty.Generic[T]):
                 if progress and total_epochs > 1:
                     pbar.reset(epoch_iterations_task) # type: ignore
                 for batch in train_loader:
-                    optimizer.zero_grad()
+                    if optimizer: optimizer.zero_grad()
                     loss, metrics = model.loss(batch.sample, cond=batch.cond)
-                    accelerator.backward(loss)
-                    optimizer.step()
-                    lr_scheduler.step()
+                    if optimizer:
+                        accelerator.backward(loss)
+                        optimizer.step()
+                    if lr_scheduler: lr_scheduler.step()
                     # check if we are done
                     if progress:
                         pbar.update(iterations_task, advance=1) # type: ignore
@@ -287,6 +291,7 @@ class GenerativePipeline(ty.Generic[T]):
                     if experiment:
                         experiment.log(metrics, series="train", step=iteration)
                         experiment.log_metric("loss", loss, series="train", step=iteration)
+                    if experiment and lr_scheduler:
                         experiment.log_metric("lr", lr_scheduler.get_last_lr()[0],
                                             series="train", step=iteration)
                     with torch.no_grad():

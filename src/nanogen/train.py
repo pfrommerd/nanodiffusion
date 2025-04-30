@@ -21,7 +21,6 @@ from nanoconfig import config, field
 from nanoconfig.options import Options
 from nanoconfig.experiment import Experiment, ExperimentConfig
 
-
 logger = logging.getLogger(__name__)
 
 @config
@@ -61,13 +60,14 @@ def main():
         pipeline=PipelineConfig(
             model=DiffusionModelConfig(
                 nn=diffusion_mlp.MlpConfig(
-                    hidden_features=(64, 128, 128, 64, 64),
-                    embed_features=32
+                    hidden_features=(256, 256, 256, 256),
+                    embed_features=128
                 ),
                 schedule=LogLinearScheduleConfig(
-                    timesteps=100, sigma_min=1e-4, sigma_max=10
+                    timesteps=256, sigma_min=1e-4, sigma_max=10
                 ),
-                sample_timesteps=100
+                sample_timesteps=64,
+                ideal_denoiser=False
             ),
             optimizer=AdamwConfig(
                 lr=1e-4,

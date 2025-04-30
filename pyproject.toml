@@ -51,5 +51,3 @@ packages = ["src/nanogen"]
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
-# Add the mazelib
-include = ["datasets/mazelib/src"]

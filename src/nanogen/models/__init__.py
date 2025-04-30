@@ -1,6 +1,7 @@
 from nanoconfig import config
 
 from nanogen.data import DataPoint, SampleValue, CondValue
+from nanoconfig.data.torch import SizedDataset
 from smalldiffusion import Schedule
 
 import torch
@@ -20,7 +21,7 @@ class GenerativeModel(abc.ABC, nn.Module):
 @config
 class ModelConfig(abc.ABC):
     @abc.abstractmethod
-    def create(self, datapoint: DataPoint) -> GenerativeModel:
+    def create(self, data: SizedDataset[DataPoint]) -> GenerativeModel:
         """
         Create the model from the sample.
         :param sample: A reference sample structure to create the model from.
