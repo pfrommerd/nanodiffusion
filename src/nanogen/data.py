@@ -2,6 +2,7 @@ import abc
 import pyarrow as pa
 import functools
 import pyarrow.dataset as ds
+import itertools
 import torch.utils.data
 import torch.utils._pytree as pytree
 import typing as ty
@@ -56,13 +57,8 @@ class DataPoint(abc.ABC):
     @abc.abstractmethod
     def to_result(self) -> NestedResult: ...
 
-    # @abc.abstractmethod
-    # def to_dataframe(self) -> pd.DataFrame: ...
-
-    @staticmethod
     @abc.abstractmethod
-    def from_values(cond: dict[str, torch.Tensor | DiscreteLabel] | torch.Tensor | DiscreteLabel,
-        sample: dict[str, torch.Tensor]) -> "DataPoint": ...
+    def with_values(self, sample: dict[str, torch.Tensor] | torch.Tensor) -> ty.Self: ...
 
 @dataclass
 class Planar(DataPoint):
@@ -98,11 +94,9 @@ class Planar(DataPoint):
         if cond is not None: value = np.concatenate((cond,value), axis=-1) # type: ignore
         return pd.DataFrame(zip(value.T, ["x", "y", "z"]))
 
-    @staticmethod
-    def from_values(cond: CondValue | None, sample: SampleValue) -> "Planar":
+    def with_values(self, sample: SampleValue) -> "Planar":
         assert isinstance(sample, torch.Tensor)
-        assert cond is None or isinstance(cond, torch.Tensor)
-        return Planar(cond, sample)
+        return Planar(self.cond_, sample)
 
     @staticmethod
     def from_dataset(dataset: ds.Dataset) -> "ty.Iterator[Planar]":
@@ -132,6 +126,7 @@ class Trajectory(DataPoint):
     start: torch.Tensor
     end: torch.Tensor
     points: torch.Tensor
+    maze: torch.Tensor
 
     @property
     def cond(self) -> CondValue | None:
@@ -142,12 +137,23 @@ class Trajectory(DataPoint):
         return self.points
 
     def to_result(self) -> NestedResult:
-        fig = None
-        return Figure(fig)
+        if self.maze.ndim == 4: maze = self.maze[0]
+        else: maze = self.maze
+        maze = Maze.from_numpy_onehot(maze.cpu().numpy())
+        x, y = self.points[:].cpu().numpy().T
+        def trajectory(traj):
+            x, y = traj.cpu().numpy().T
+            return [go.Scatter(x=[x[0]], y=[y[0]*-1], mode="markers", marker_color="green"),
+                go.Scatter(x=[x[-1]], y=[y[-1]*-1], mode="markers", marker_color="red"),
+                go.Scatter(x=list(x), y=list(y*-1), mode="lines", marker_color="blue")]
+        return Figure(go.Figure([
+            maze.render_plotly((2, 2), (0,0)),
+        ] + list(itertools.chain.from_iterable(trajectory(traj) for traj in self.points)),
+        dict(showlegend=False, xaxis_range=[-1.1, 1.1], yaxis_range=[-1.1, 1.1])))
 
-    @staticmethod
-    def from_values(cond: CondValue | None, sample: SampleValue) -> "Trajectory":
-        return Trajectory(cond["start"], cond["end"], sample) # type: ignore
+    def with_values(self, sample: SampleValue) -> "Trajectory":
+        assert isinstance(sample, torch.Tensor)
+        return Trajectory(self.start, self.end, sample, self.maze) # type: ignore
 
     @staticmethod
     def from_dataset(dataset: ds.Dataset) -> "ty.Iterator[Trajectory]":
@@ -155,11 +161,12 @@ class Trajectory(DataPoint):
             start = torch.tensor(data_utils.as_numpy(batch["start"]).copy())
             end = torch.tensor(data_utils.as_numpy(batch["end"]).copy())
             points = torch.tensor(data_utils.as_numpy(batch["trajectory"]).copy())
-            yield Trajectory(start, end, points)
+            maze = torch.tensor(data_utils.as_numpy(batch["maze"]).copy())
+            yield Trajectory(start, end, points, maze)
 
 pytree.register_pytree_node(
-    Trajectory, lambda traj: ([traj.start, traj.end, traj.points], None),
-    lambda children, aux: Trajectory(children[0], children[1], children[2]) # type: ignore
+    Trajectory, lambda traj: ([traj.start, traj.end, traj.points, traj.maze], None),
+    lambda children, aux: Trajectory(children[0], children[1], children[2], children[3]) # type: ignore
 )
 
 
@@ -178,8 +185,7 @@ class Image(DataPoint):
     def to_result(self) -> NestedResult:
         return ImageResult(self.image)
 
-    @staticmethod
-    def from_values(cond: CondValue | None, sample: SampleValue) -> "Image":
+    def with_values(self, sample: SampleValue) -> "Image":
         assert isinstance(sample, torch.Tensor)
         return Image(sample)
 

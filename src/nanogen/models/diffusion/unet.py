@@ -162,7 +162,7 @@ class Unet(Diffuser):
                 up.blocks.append(CondSequential(*block))
                 block_in = block_out
             if i_level < self.num_resolutions - 1: # Not last iter
-                up.upsample = Upsample(block_in) # type: ignore
+                up.upsample = Upsample(block_in, Conv=Conv) # type: ignore
                 red_factor = red_factor // 2
             self.ups.append(up)
 
@@ -179,12 +179,9 @@ class Unet(Diffuser):
         x = torch.transpose(x, -1, -2)
         # Embeddings
         emb = self.sig_embed(x.shape[0], sigma.squeeze())
-        if self.cond_embed is not None:
-            assert cond is not None and x.shape[0] == cond.shape[0], \
-                'Conditioning must have same batches as x!'
-            cond_embed = self.cond_embed(cond)
-            emb += cond_embed
-
+        if cond is not None:
+            assert self.cond_embed is not None
+            emb += self.cond_embed(cond)
         # downsampling
         hs = [self.conv_in(x)]
         for down in self.downs:
@@ -212,11 +209,11 @@ class Unet(Diffuser):
 
 @config(variant="unet")
 class UnetConfig(DiffuserConfig):
-    base_channels: int = 128
+    base_channels: int = 64
     channel_mults: ty.Sequence[int] = (1, 2, 2, 2)
     embed_channel_mult: int = 4
     num_res_blocks: int = 2
-    attn_resolutions: ty.Sequence[int] = (4,)
+    attn_resolutions: ty.Sequence[int] = (8,)
     dropout: float = 0.1
     resample_with_conv: bool = True
 

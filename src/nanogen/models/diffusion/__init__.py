@@ -171,10 +171,10 @@ class CondEmbedder(nn.Module):
         cond_flat : list[torch.Tensor | DiscreteLabel] = pytree.tree_leaves(cond)
         cond_labels = [c for c in cond_flat if isinstance(c, DiscreteLabel)]
         cond_features = [c for c in cond_flat if isinstance(c, torch.Tensor)]
-
         cond = None
         for label, label_embed in zip(cond_labels, self.cond_class_embed):
-            cond = (cond + label_embed(label)) if cond is not None else cond
+            cond = (cond + label_embed(label)) if cond is not None else label_embed(label)
         for feature, feature_embed in zip(cond_features, self.cond_feature_embed):
-            cond = (cond + feature_embed(feature)) if cond is not None else cond
+            cond = (cond + feature_embed(feature)) if cond is not None else feature_embed(feature)
+        assert cond is not None, "cond should not be None"
         return cond

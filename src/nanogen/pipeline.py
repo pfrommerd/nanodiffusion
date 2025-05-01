@@ -216,12 +216,6 @@ class GenerativePipeline(ty.Generic[T]):
                 lambda x: torch.repeat_interleave(x[None], self.gen_batch_size, dim=0)
                     if isinstance(x, torch.Tensor) else x, self.datapoint
             ).to(accelerator.device)
-
-        if experiment:
-            sample_batch : T = next(iter(test_loader))
-            experiment.log({
-                "samples" : sample_batch.to_result()
-            }, series="gt")
         (
             model, optimizer, lr_scheduler,
             train_loader, test_loader,
@@ -235,6 +229,12 @@ class GenerativePipeline(ty.Generic[T]):
         if test_gen_loader is not None and train_gen_loader is not None:
             test_gen_loader = utils.cycle(test_gen_loader)
             train_gen_loader = utils.cycle(train_gen_loader)
+
+        if experiment:
+            sample_batch : T = next(test_gen_loader)
+            experiment.log({
+                "samples" : sample_batch.to_result()
+            }, series="gt")
 
         total_params = sum(param.numel() for param in model.parameters())
         logger.info(f"Total parameters: {total_params}")
@@ -309,14 +309,14 @@ class GenerativePipeline(ty.Generic[T]):
                                 test_batch = next(test_gen_loader).to(accelerator.device) # type: ignore
                                 *_, train_samples = model.generate(train_batch.sample, train_batch.cond)
                                 *_, test_samples = model.generate(test_batch.sample, test_batch.cond)
-                                train_datapoints : T = self.datapoint.from_values(train_batch.cond, train_samples) # type: ignore
-                                test_datapoints : T = self.datapoint.from_values(test_batch.cond, test_samples) # type: ignore
+                                train_datapoints : T = train_batch.with_values(train_samples) # type: ignore
+                                test_datapoints : T = test_batch.with_values(test_samples) # type: ignore
                                 experiment.log({"samples" : train_datapoints.to_result()}, step=iteration, series="train")
                                 experiment.log({"samples" : test_datapoints.to_result()}, step=iteration, series="test")
                             else:
                                 assert gen_batch is not None
                                 *_, train_samples = model.generate(gen_batch.sample)
-                                train_datapoints : T = self.datapoint.from_values(None, train_samples) # type: ignore
+                                train_datapoints : T = self.datapoint.with_values(train_samples) # type: ignore
                                 experiment.log({"samples" : train_datapoints.to_result()}, series="test", step=iteration)
                     iteration += 1
                     if iteration >= iterations:

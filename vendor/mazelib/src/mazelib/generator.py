@@ -4,7 +4,7 @@ import time
 
 from numpy.random import Generator as Rng
 
-from .maze import Maze, Cell, CellType
+from .maze import Maze, Cell
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +23,7 @@ class DepthFirstGenerator(MazeGenerator):
         time_start = time.time()
         # pick an initial, reachable cell to start from
         # if the maze is partially generated
-        if maze.type_cells[CellType.REACHABLE]:
-            initial_cells = maze.type_cells[CellType.REACHABLE]
-        else:
-            # If there are no existing reachable cells, pick any cell
-            initial_cells = maze.cells
+        initial_cells = maze.cells
         current_cell = initial_cells[rng.choice(len(initial_cells))]
         visited.add(current_cell)
 
@@ -35,13 +31,11 @@ class DepthFirstGenerator(MazeGenerator):
         while len(visited) < maze.total_cells:
             iteration = iteration + 1
             # All unreachable, unvisited neighbors of this cell
-            new_neighbors = list(n for n in current_cell.all_neighbors
-                if n not in visited and n.type == CellType.UNREACHABLE)
+            new_neighbors = list(n for n in current_cell.all_neighbors if n not in visited)
             if new_neighbors:
                 visited_stack.append(current_cell)              # Add current cell to stack
                 neighbor_idx = rng.choice(len(new_neighbors))     # Choose random neighbour
                 next_cell = new_neighbors[neighbor_idx]
-                next_cell.set_type(CellType.REACHABLE)
                 visited.add(next_cell)
                 current_cell.remove_walls(next_cell)
                 current_cell = next_cell
@@ -51,13 +45,5 @@ class DepthFirstGenerator(MazeGenerator):
             if iteration > maze.total_cells*maze.total_cells:
                 raise TimeoutError("Maze generation timed out")
         gen_time = time.time() - time_start
-        # Generate start and end cells
-        if not maze.type_cells[CellType.ENTRY] and not maze.type_cells[CellType.EXIT]:
-            edge_cells = maze.edge_cells
-            entry_idx, exit_idx = rng.choice(len(edge_cells), 2, replace=False)
-            entry_cell = edge_cells[entry_idx]
-            exit_cell = edge_cells[exit_idx]
-            entry_cell.set_type(CellType.ENTRY)
-            exit_cell.set_type(CellType.EXIT)
         logger.info(f"Maze generation took: {gen_time:.4f}")
         return maze

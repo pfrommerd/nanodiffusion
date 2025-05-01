@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 class TrainConfig:
     pipeline: PipelineConfig = field(flat=True)
     experiment: ExperimentConfig = field(flat=True)
-    final_checkpoint: bool = False
+    final_checkpoint: bool = True
     cpu: bool = False
 
     def run(self, logger):
@@ -43,6 +43,7 @@ def _run_experiment(experiment: Experiment):
     config : TrainConfig = experiment.config # type: ignore
     pipeline = GenerativePipeline.from_config(config.pipeline)
     a = Accelerator(cpu=config.cpu)
+    logger.info(f"Training {config}")
     pipeline.train(
         progress=True,
         experiment=experiment,
@@ -66,7 +67,7 @@ def main():
                 schedule=LogLinearScheduleConfig(
                     timesteps=256, sigma_min=1e-4, sigma_max=10
                 ),
-                sample_timesteps=64,
+                sample_timesteps=32,
                 ideal_denoiser=False
             ),
             optimizer=AdamwConfig(

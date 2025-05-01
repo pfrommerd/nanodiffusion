@@ -3,14 +3,13 @@ import abc
 import heapq
 
 from dataclasses import dataclass, field
-from .maze import Maze, Cell, CellType
+from .maze import Maze, Cell
 from numpy.random import Generator as Rng
 
 class Solver(abc.ABC):
     @abc.abstractmethod
     def solve(self, rng: Rng, maze: Maze,
-                    start: Cell | None = None,
-                    end: Cell | None = None) -> list[Cell]:
+                    start: Cell, end: Cell) -> list[Cell]:
         pass
 
 @dataclass(order=True)
@@ -20,20 +19,8 @@ class QueueItem:
     cell: Cell = field(compare=False)
 
 class DjikstraSolver(Solver):
-    def solve(self, rng: Rng, maze: Maze, start: Cell | None = None,
-                            end: Cell | None = None) -> list[Cell]:
-        if start is None:
-            entry_cells = maze.type_cells[CellType.ENTRY]
-            if not entry_cells:
-                raise ValueError("No entry cells found in the maze.")
-            entry_idx = rng.choice(len(entry_cells))
-            start = entry_cells[entry_idx]
-        if end is None:
-            exit_cells = maze.type_cells[CellType.EXIT]
-            if not exit_cells:
-                raise ValueError("No exit cells found in the maze.")
-            exit_idx = rng.choice(len(exit_cells))
-            end = exit_cells[exit_idx]
+    def solve(self, rng: Rng, maze: Maze, start: Cell,
+                            end: Cell) -> list[Cell]:
         assert start is not None and end is not None
         visited = set()
 

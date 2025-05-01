@@ -62,7 +62,7 @@ class DiffusionMLP(Diffuser):
         embed = self.sigma_embedder(x.shape[0], sigma)
         if cond is not None:
             assert self.cond_embedder is not None
-            cond += self.cond_embedder(cond)
+            embed += self.cond_embedder(cond)
 
         x = x.flatten(1)
         for (layer, embed_layer) in zip(self.layers, self.embed_layers):
