@@ -372,6 +372,11 @@ class GenerativePipeline(ty.Generic[T]):
             assert cond_min is not None and cond_max is not None
             logger.info("Computed bounds.")
 
+        sample_gen_batch = pytree.tree_map(
+            lambda x: x[None].expand(self.gen_batch_size, *x.shape) if isinstance(x, torch.Tensor) else x,
+            self.datapoint.sample
+        )
+
         (model, optimizer, lr_scheduler) = accelerator.prepare(
             self.model, self.optimizer, self.lr_scheduler,
         )
@@ -424,5 +429,14 @@ class GenerativePipeline(ty.Generic[T]):
                     experiment.log_metric("lr", lr_scheduler.get_last_lr()[0],
                                         series="train", step=iteration)
                     experiment.log(metrics, series="train", step=iteration)
+
+                    if test_interval and iteration % generate_interval == 0 and experiment:
+                        cond_batch = pytree.tree_map(
+                            lambda min, max: torch.rand(self.gen_batch_size, *min.shape, device=min.device)*(max - min) + min,
+                            cond_min, cond_max)
+                        *_, samples = model.generate(sample_gen_batch, cond_batch)
+                        samples = self.datapoint.with_values(samples, cond_batch)
+                        experiment.log({"samples" : samples.to_result()}, step=iteration, series="test")
+
                 if progress:
                     pbar.advance(iterations_task) # type: ignore
