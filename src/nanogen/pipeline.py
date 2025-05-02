@@ -436,6 +436,8 @@ class GenerativePipeline(ty.Generic[T]):
                             cond_min, cond_max)
                         *_, samples = model.generate(sample_gen_batch, cond_batch)
                         samples = self.datapoint.with_values(samples, cond_batch)
+                        # log the training samples
+                        experiment.log({"samples" : batch.to_result()}, step=iteration, series="gt")
                         experiment.log({"samples" : samples.to_result()}, step=iteration, series="test")
 
                 if progress:
