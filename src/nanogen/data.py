@@ -257,7 +257,7 @@ class Image(DataPoint):
     def with_values(self, sample: SampleValue, cond: CondValue | None = None) -> "Image":
         assert isinstance(sample, torch.Tensor)
         embed = self.embed if cond is None else cond
-        return Image(sample, self.label, embed) # type: ignore
+        return Image(sample, None, embed) # type: ignore
 
     @staticmethod
     def from_dataset(dataset: ds.Dataset) -> "ty.Iterator[Image]":

@@ -1,6 +1,7 @@
 import logging
 import accelerate
 import torch
+import random
 import itertools
 import contextlib
 import smalldiffusion
@@ -23,8 +24,6 @@ from nanoconfig.data.source import DataRepository
 from nanoconfig.data.torch import SizedDataset, TorchAdapter
 
 from dataclasses import replace
-
-from nanogen import train
 
 from .data import DataPoint
 from .models import GenerativeModel, ModelConfig
@@ -161,9 +160,11 @@ class GenerativePipeline(ty.Generic[T]):
 
     @staticmethod
     def load(file, load_optim_state: bool = False,
-                device: str = "cpu"):
+                device: str = "cpu", modify_config: ty.Callable | None = None):
         data = io.load(file, device=device)
         config = PipelineConfig.from_dict(data["config"])
+        if modify_config is not None:
+            config = modify_config(config)
         pipeline = GenerativePipeline.from_config(config)
         pipeline.model.load_state_dict(data["model"])
         return pipeline
@@ -389,11 +390,25 @@ class GenerativePipeline(ty.Generic[T]):
         else: pbar = contextlib.nullcontext()
 
         def data_generator():
+            shuffle_buffer = []
             while True:
-                cond = pytree.tree_map(
-                    lambda min, max: torch.rand(self.batch_size, *min.shape, device=min.device)*(max - min) + min,
-                    cond_min, cond_max)
-                yield teacher.generate(self.batch_size, cond=cond, accelerator=accelerator)
+                if len(shuffle_buffer) < 64:
+                    cond = pytree.tree_map(
+                        lambda min, max: torch.rand(8*self.batch_size, *min.shape, device=min.device)*(max - min) + min,
+                        cond_min, cond_max)
+                    samples = teacher.generate(8*self.batch_size, cond=cond, accelerator=accelerator)
+                    # Convert big batch into smaller batches
+                    samples = pytree.tree_map(
+                        lambda x: x.reshape(8, -1, *x.shape[1:]) if isinstance(x, torch.Tensor) else x, samples
+                    )
+                    batches = [pytree.tree_map(lambda x: x[i] if isinstance(x, torch.Tensor) else x, samples)
+                                for i in range(8)]
+                    shuffle_buffer.extend(batches)
+                else:
+                    buffer = shuffle_buffer.pop(torch.randint(len(shuffle_buffer), ()))
+                    v = torch.bernoulli(torch.tensor(0.9))
+                    if v: shuffle_buffer.append(buffer)
+                    yield buffer
 
         with pbar:
             model.train()

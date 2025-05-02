@@ -2,6 +2,7 @@ from nanoconfig import config, field, Config, MISSING
 from nanoconfig.experiment import Experiment, ExperimentConfig
 from nanoconfig.options import Options
 
+from nanogen.models.diffusion import DiffusionModel, DiffusionModelConfig
 from nanogen.pipeline import GenerativePipeline
 
 from .utils import setup_logging
@@ -14,6 +15,8 @@ class DistillConfig(Config):
     teacher_artifact: str
     experiment: ExperimentConfig = field(flat=True)
     final_checkpoint: bool = field(default=False)
+
+    sampler_preset: str | None = None
 
     batch_size: int | None = None
     iterations: int | None = None
@@ -30,6 +33,7 @@ def _run(experiment: Experiment):
         raise ValueError(f"Artifact {name}:{version} not found")
     artifact = experiment.use_artifact(artifact_id)
     assert artifact is not None
+
     with artifact.open_file("model.safetensors") as f:
         teacher = GenerativePipeline.load(f)
 
@@ -38,6 +42,22 @@ def _run(experiment: Experiment):
     # Override batch size if specified
     if config.batch_size is not None:
         student.batch_size = config.batch_size
+
+    if config.sampler_preset is not None:
+        assert isinstance(teacher.model, DiffusionModel)
+        match config.sampler_preset:
+            case "ddim":
+                teacher.model.gamma = 1.0
+                teacher.model.mu = 0.0
+            case "ddpm":
+                teacher.model.gamma = 1.0
+                teacher.model.mu = 0.5
+            case "accel":
+                teacher.model.gamma = 2.0
+                teacher.model.mu = 0.0
+            case _:
+                raise ValueError(f"Unknown sampler preset {config.sampler_preset}")
+
     student.distill(
         teacher, config.iterations,
         experiment=experiment,
