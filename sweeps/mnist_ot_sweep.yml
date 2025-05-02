@@ -1,0 +1,17 @@
+program: ot
+project: nanogen_mnist
+name: sampler_data_sweep
+method: grid
+parameters:
+    wandb:
+        value: true
+    artifact:
+        values:
+            - dpfrommer-projects/nanogen_mnist/diffuser:v15
+            - dpfrommer-projects/nanogen_mnist/diffuser:v16
+            - dpfrommer-projects/nanogen_mnist/diffuser:v17
+            - dpfrommer-projects/nanogen_mnist/diffuser:v18
+command:
+    - ${env}
+    - ${program}
+    - ${args}
