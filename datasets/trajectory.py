@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--num", type=int, default=4096)
+parser.add_argument("--num", type=int, default=2*4096)
 parser.add_argument("--num-mazes", type=int, default=1)
 parser.add_argument("--trajectory-length", type=int, default=64)
 parser.add_argument("--maze-size", type=int, default=8)
@@ -64,13 +64,21 @@ maze_generator = DepthFirstGenerator()
 maze_solver = DjikstraSolver()
 
 schema = pa.schema([
-    pa.field("start", pa.list_(pa.float32(), 2)),
-    pa.field("end", pa.list_(pa.float32(), 2)),
-    pa.field("trajectory", pa.list_(pa.list_(pa.float32(),2), TRAJECTORY_LENGTH)),
-    pa.field("maze", pa.list_(pa.list_(
+    pa.field("start", pa.list_(pa.float32(), 2),
+        metadata={"mime_type": "point"}),
+    pa.field("end", pa.list_(pa.float32(), 2),
+        metadata={"mime_type": "point"}),
+    pa.field("trajectory",
+        pa.list_(pa.list_(pa.float32(),2), TRAJECTORY_LENGTH),
+        metadata={"mime_type": "trajectory"}
+    ),
+    pa.field("maze",
+        pa.list_(pa.list_(
             pa.list_(pa.bool_(),4),
-            MAZE_SIZE),MAZE_SIZE)),
-], metadata={"mime_type": "parquet/trajectory"})
+            MAZE_SIZE),MAZE_SIZE),
+        metadata={"mime_type": "maze/edges_one_hot"}
+    ),
+], metadata={"mime_type": "data/trajectory+maze"})
 
 def generate_maze(rng):
     maze = Maze(MAZE_SIZE, MAZE_SIZE)

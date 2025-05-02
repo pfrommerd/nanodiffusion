@@ -43,9 +43,9 @@ import logging
 writer = FsDataWriter(args.output_dir, SHA)
 
 schema = pa.schema([
-    pa.field("x", pa.float32()),
-    pa.field("y", pa.float32()),
-], metadata={"mime_type": "parquet/planar"})
+    pa.field("x", pa.float32(), metadata={"mime_type": "scalar"}),
+    pa.field("y", pa.float32(), metadata={"mime_type": "scalar"}),
+], metadata={"mime_type": "data/point"})
 
 rng = np.random.default_rng(seed=SEED)
 for split in {"train", "test"}:

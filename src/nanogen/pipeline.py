@@ -60,6 +60,11 @@ class PipelineConfig(Config):
     optimizer : OptimizerConfig
     # Aliases or sha of the different datasets to use
     data: str
+    # Override the data type
+    data_type: str | None = None
+    # Limit the number of training samples to use
+    limit_data: int | None = None
+
     batch_size: int = 32
     test_batch_size: int = 64
     gen_batch_size: int = 64
@@ -116,7 +121,7 @@ class GenerativePipeline(ty.Generic[T]):
         if data_repo is None:
             data_repo = DataRepository.default()
         if data_adapter is None:
-            data_adapter = TorchAdapter()
+            data_adapter = TorchAdapter(override_mime_type=config.data_type)
             from .data import register_types
             register_types(data_adapter) # type: ignore
         data = data_repo.lookup(config.data)
@@ -126,7 +131,9 @@ class GenerativePipeline(ty.Generic[T]):
         config = replace(config, data=data.sha256)
         train_data = data.split("train", data_adapter)
         test_data = data.split("test", data_adapter)
-        assert train_data is not None
+        assert train_data is not None and test_data is not None
+        if config.limit_data is not None:
+            train_data = train_data.limit(config.limit_data)
         model = config.model.create(train_data) # type: ignore
         if list(model.parameters()):
             optimizer, lr_scheduler = config.optimizer.create(model.parameters(), config.iterations) if create_optimizer else (None, None)
@@ -176,9 +183,12 @@ class GenerativePipeline(ty.Generic[T]):
             cond = next(iter(loader)).cond # type: ignore
             cond = cond.to(accelerator.device) # type: ignore
             N = min(N, utils.axis_size(cond, 0))
-
-        _, samples = model.generate(cond, **kwargs)
-        return self.datapoint.from_values(cond, samples) # type: ignore
+        sample_structure = pytree.tree_map(
+            lambda x: x[None].expand(N, *x.shape) if isinstance(x, torch.Tensor) else x,
+            self.datapoint.sample
+        )
+        *_, samples = model.generate(sample_structure, cond, **kwargs)
+        return self.datapoint.with_values(samples, cond) # type: ignore
 
     def train(self, iterations : Interval | int | None = None,
               *,
@@ -349,18 +359,17 @@ class GenerativePipeline(ty.Generic[T]):
         cond_min, cond_max = None, None
         if self.datapoint.has_cond:
             logger.info("Computing conditioning bounds...")
-            for data in self.train_data.loader(batch_size=self.test_batch_size):
+            for data in accelerator.prepare(self.train_data.loader(
+                        batch_size=self.test_batch_size)):
                 cond = data.cond
-                batch_min = pytree.tree_map(lambda x: x.min(dim=0), cond)
-                batch_max = pytree.tree_map(lambda x: x.max(dim=0), cond)
+                batch_min = pytree.tree_map(lambda x: x.min(dim=0)[0], cond)
+                batch_max = pytree.tree_map(lambda x: x.max(dim=0)[0], cond)
                 if cond_min is None or cond_max is None:
                     cond_min, cond_max = batch_min, batch_max
                 else:
                     cond_min = pytree.tree_map(torch.minimum, cond_min, batch_min)
                     cond_max = pytree.tree_map(torch.maximum, cond_max, batch_max)
             assert cond_min is not None and cond_max is not None
-            cond_min, cond_max = pytree.tree_map(lambda x: x.to(accelerator.device),
-                                        (cond_min, cond_max))
             logger.info("Computed bounds.")
 
         (model, optimizer, lr_scheduler) = accelerator.prepare(
@@ -383,15 +392,15 @@ class GenerativePipeline(ty.Generic[T]):
         def data_generator():
             while True:
                 cond = pytree.tree_map(
-                    lambda min, max: torch.rand(self.batch_size, *min.shape)*(max - min) + min,
+                    lambda min, max: torch.rand(self.batch_size, *min.shape, device=min.device)*(max - min) + min,
                     cond_min, cond_max)
-                yield teacher.generate(self.batch_size, cond=cond)
+                yield teacher.generate(self.batch_size, cond=cond, accelerator=accelerator)
 
         with pbar:
             model.train()
             for iteration, batch in enumerate(itertools.islice(data_generator(), iterations)):
                 optimizer.zero_grad()
-                loss = model.loss(batch.sample, cond=batch.cond)
+                loss, metrics = model.loss(batch.sample, cond=batch.cond)
                 accelerator.backward(loss)
                 optimizer.step()
                 lr_scheduler.step()
@@ -400,5 +409,6 @@ class GenerativePipeline(ty.Generic[T]):
                                         series="train", step=iteration)
                     experiment.log_metric("lr", lr_scheduler.get_last_lr()[0],
                                         series="train", step=iteration)
+                    experiment.log(metrics, series="train", step=iteration)
                 if progress:
                     pbar.advance(iterations_task) # type: ignore

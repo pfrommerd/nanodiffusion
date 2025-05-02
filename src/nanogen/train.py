@@ -29,6 +29,7 @@ class TrainConfig:
     experiment: ExperimentConfig = field(flat=True)
     final_checkpoint: bool = True
     cpu: bool = False
+    distill: bool = False
 
     def run(self, logger):
         experiment = self.experiment.create(
@@ -53,6 +54,17 @@ def _run_experiment(experiment: Experiment):
         with experiment.create_artifact("diffuser", type="model") as builder:
             with builder.create_file("model.safetensors") as f:
                 pipeline.save(f)
+    # For convenience, run the distillation right away
+    if config.distill:
+        # essentially makes the next step, step "0"
+        experiment.step_offset(experiment.step + 1)
+        student = GenerativePipeline.from_config(config.pipeline)
+        student.distill(pipeline, progress=True,
+            experiment=experiment, accelerator=a)
+        if config.final_checkpoint:
+            with experiment.create_artifact("distilled", type="model") as builder:
+                with builder.create_file("model.safetensors") as f:
+                    student.save(f)
     return pipeline
 
 def main():
@@ -65,16 +77,14 @@ def main():
                     embed_features=128
                 ),
                 schedule=LogLinearScheduleConfig(
-                    timesteps=256, sigma_min=1e-4, sigma_max=10
+                    timesteps=512, sigma_min=5e-4, sigma_max=5
                 ),
                 sample_timesteps=32,
                 ideal_denoiser=False
             ),
             optimizer=AdamwConfig(
-                lr=1e-4,
-                weight_decay=1e-2,
-                betas=(0.9, 0.999),
-                eps=1e-8
+                lr=5e-4, weight_decay=1e-4,
+                betas=(0.9, 0.999), eps=1e-8
             ),
             data="single-maze-trajectory",
             gen_batch_size=512,

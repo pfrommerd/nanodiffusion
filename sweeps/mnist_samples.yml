@@ -1,0 +1,29 @@
+program: train
+name: mnist_samples
+method: grid
+parameters:
+    wandb:
+        value: true
+    model.diffusion.nn.type:
+        value: unet
+    model.diffusion.sampler_preset:
+        values: ["ddim", "ddpm", "accel"]
+    limit_data:
+        values: [10_000, 30_000, 45_000, 60_000]
+    batch_size:
+        value: 256
+    gen_batch_size:
+        value: 64
+    iterations:
+        value: 150 # for smoke testing
+        # value: 150_000
+    optimizer.lr:
+        value: 0.0005
+    data:
+        value: mnist
+    distill:
+        value: true
+command:
+    - ${env}
+    - ${program}
+    - ${args}

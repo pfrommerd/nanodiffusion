@@ -15,18 +15,31 @@ from . import CondEmbedder, DiffuserConfig, ModelConfig, Diffuser, SampleValue, 
 def Normalize(ch):
     return torch.nn.GroupNorm(num_groups=32, num_channels=ch, eps=1e-6, affine=True)
 
-def Upsample(ch, Conv):
-    return nn.Sequential(
-        nn.Upsample(scale_factor=2.0, mode='linear', align_corners=True),
-        Conv(ch, ch, kernel_size=3, stride=1, padding=1),
-    )
+class Upsample(nn.Module):
+    def __init__(self, channels, Conv):
+        super().__init__()
+        self.conv = Conv(channels, channels, kernel_size=3, stride=1, padding=1)
 
-def Downsample(ch, Conv):
-    return nn.Sequential(
-        nn.ConstantPad1d((0, 1), 0),
-        Conv(ch, ch, kernel_size=3, stride=2, padding=0),
-    )
+    def forward(self, x, target_size):
+        x = nn.functional.interpolate(x, size=target_size, mode='nearest')
+        return self.conv(x)
 
+class Downsample(nn.Module):
+    def __init__(self, channels, spatial_dims, Conv):
+        super().__init__()
+        if spatial_dims == 1:
+            self.padder = nn.ConstantPad1d((0, 1), 0)
+        elif spatial_dims == 2:
+            self.padder = nn.ConstantPad2d((0, 1, 0, 1), 0)
+        elif spatial_dims == 3:
+            self.padder = nn.ConstantPad3d((0, 1, 0, 1, 0, 1), 0)
+        else:
+            raise ValueError(f"Unsupported spatial dimensions: {spatial_dims}")
+        self.conv = Conv(channels, channels, kernel_size=3, stride=2, padding=1)
+
+    def forward(self, x):
+        x = self.padder(x)
+        return self.conv(x)
 
 class ResnetBlock(nn.Module):
     def __init__(self, *, in_ch, out_ch=None, conv_shortcut=False,
@@ -59,29 +72,34 @@ class ResnetBlock(nn.Module):
     def forward(self, x, temb):
         h = x
         h = self.layer1(h)
-        h = h + self.temb_proj(temb)[:, :, None]
+        embed = self.temb_proj(temb)
+        while embed.ndim < h.ndim:
+            embed = embed.unsqueeze(-1)
+        h = h + embed
         h = self.layer2(h)
         if self.in_ch != self.out_ch:
             x = self.shortcut(x)
         return x + h
 
 class AttnBlock(nn.Module):
-    def __init__(self, ch, num_heads=1):
+    def __init__(self, ch, *, num_heads=1, Conv):
         super().__init__()
         # Normalize input along the channel dimension
         self.norm = Normalize(ch)
         # Attention over D: (B, N, D) -> (B, N, D)
         self.attn = Attention(head_dim=ch // num_heads, num_heads=num_heads)
         # Apply 1x1 convolution for projection
-        self.proj_out = nn.Conv1d(ch, ch, kernel_size=1, stride=1, padding=0)
+        self.proj_out = Conv(ch, ch, kernel_size=1, stride=1, padding=0)
 
     def forward(self, x, temb):
         # temb is currently not used, but included for CondSequential to work
-        B, C, L = x.shape
         h_ = self.norm(x)
-        h_ = rearrange(h_, 'b c l -> b l c')
+        spatial_dims = h_.shape[2:]
+        h_ = h_.view(h_.shape[0], h_.shape[1], math.prod(spatial_dims))
+        h_ = h_.transpose(1, -1) # move channel to last dimension
         h_ = self.attn(h_)
-        h_ = rearrange(h_, 'b l c -> b c l')
+        h_ = h_.transpose(1, -1) # move channel back to first dimension
+        h_ = h_.view(h_.shape[0], h_.shape[1], *spatial_dims)
         return x + self.proj_out(h_)
 
 class Unet(Diffuser):
@@ -122,98 +140,98 @@ class Unet(Diffuser):
 
         # Downsampling
         in_ch_dim = [ch * m for m in (1,)+tuple(ch_mult)]
-        self.conv_in = Conv(in_ch, self.ch, kernel_size=3, stride=1, padding=1)
+        self.conv_in = Conv(in_ch, self.ch, kernel_size=5, stride=1, padding=2)
         self.downs = nn.ModuleList()
-        block_in, block_out = 0, 0
+
         red_factor = 1
+        block_in, block_out = None, None
+        skip_channels = []
         for i, (block_in, block_out) in enumerate(pairwise(in_ch_dim)):
             down = nn.Module()
             down.blocks = nn.ModuleList()
             for _ in range(self.num_res_blocks):
-                block : list = [make_block(block_in, block_out)]
-                if red_factor in attn_resolutions:
-                    block.append(AttnBlock(block_out))
-                down.blocks.append(CondSequential(*block))
+                down.blocks.append(make_block(block_in, block_out))
                 block_in = block_out
+                if red_factor in attn_resolutions:
+                    down.blocks.append(AttnBlock(block_in, Conv=Conv))
             if i < self.num_resolutions - 1: # Not last iter
-                down.downsample = Downsample(block_in, Conv=Conv)
+                down.blocks.append(Downsample(block_in, spatial_dims, Conv=Conv))
+                skip_channels.append(block_in)
                 red_factor *= 2
             self.downs.append(down)
-
         # Middle
         self.mid = CondSequential(
             make_block(block_in, block_in),
-            AttnBlock(block_in),
+            AttnBlock(block_in, Conv=Conv),
             make_block(block_in, block_in)
         )
-
         # Upsampling
         self.ups = nn.ModuleList()
-        for i_level, (block_out, next_skip_in) in enumerate(pairwise(reversed(in_ch_dim))):
+        for i_level, ((block_in, block_out), skip_ch) in enumerate(
+                    zip(pairwise(reversed(in_ch_dim)), reversed(skip_channels))
+                ):
             up = nn.Module()
             up.blocks = nn.ModuleList()
-            skip_in = block_out
-            for i_block in range(self.num_res_blocks+1):
-                if i_block == self.num_res_blocks:
-                    skip_in = next_skip_in
-                block = [make_block(block_in+skip_in, block_out)]
-                if red_factor in attn_resolutions:
-                    block.append(AttnBlock(block_out)) # type: ignore
-                up.blocks.append(CondSequential(*block))
+            for _ in range(self.num_res_blocks):
+                up.blocks.append(make_block(block_in + skip_ch, block_out))
+                skip_ch = 0
                 block_in = block_out
+                if red_factor in attn_resolutions:
+                    up.blocks.append(AttnBlock(block_in, Conv=Conv)) # type: ignore
             if i_level < self.num_resolutions - 1: # Not last iter
-                up.upsample = Upsample(block_in, Conv=Conv) # type: ignore
+                up.blocks.append(Upsample(block_in, Conv=Conv)) # type: ignore
                 red_factor = red_factor // 2
             self.ups.append(up)
-
         # Out
         self.out_layer = nn.Sequential(
             Normalize(block_in), # type: ignore
             nn.SiLU(),
-            Conv(block_in, out_ch, # type: ignore
-                kernel_size=3, stride=1, padding=1),
+            Conv(block_in, out_ch, kernel_size=3, stride=1, padding=1), # type: ignore
         )
 
     def forward(self, x, sigma, cond=None):
-        # Turn B T C -> B C T
-        x = torch.transpose(x, -1, -2)
+        # Move the channels from last to be after the batch dimension
+        x = torch.transpose(x, -1, 1)
         # Embeddings
         emb = self.sig_embed(x.shape[0], sigma.squeeze())
         if cond is not None:
             assert self.cond_embed is not None
             emb += self.cond_embed(cond)
+
         # downsampling
-        hs = [self.conv_in(x)]
-        for down in self.downs:
+        h = self.conv_in(x)
+        hs = [h]
+        for i, down in enumerate(self.downs):
             for block in down.blocks: # type: ignore
-                h = block(hs[-1], emb)
+                if not isinstance(block, Downsample):
+                    h = block(h, emb)
+                else:
+                    h = block(h)
+            # skip except for the last block
+            if i < len(self.downs) - 1:
                 hs.append(h)
-            if hasattr(down, 'downsample'):
-                hs.append(down.downsample(hs[-1])) # type: ignore
-
         # middle
-        h = self.mid(hs[-1], emb)
-
+        h = self.mid(h, emb)
         # upsampling
         for up in self.ups:
+            h = torch.cat([h, hs.pop()], dim=1)
             for block in up.blocks: # type: ignore
-                h = block(torch.cat([h, hs.pop()], dim=1), emb)
-            if hasattr(up, 'upsample'):
-                h = up.upsample(h) # type: ignore
-
-        # out
+                if not isinstance(block, Upsample):
+                    h = block(h, emb)
+                else:
+                    h = block(h, target_size=hs[-1].shape[2:])
         out = self.out_layer(h)
-        # Turn B C T -> B T C
-        out = torch.transpose(out, -1, -2)
+        # move channels back to last
+        out = torch.transpose(out, 1, -1)
         return out
 
 @config(variant="unet")
 class UnetConfig(DiffuserConfig):
-    base_channels: int = 64
-    channel_mults: ty.Sequence[int] = (1, 2, 2, 2)
+    base_channels: int = 32
+    channel_mults: ty.Sequence[int] = (1, 2, 4, 4)
     embed_channel_mult: int = 4
     num_res_blocks: int = 2
-    attn_resolutions: ty.Sequence[int] = (8,)
+    attn_resolutions: ty.Sequence[int] = (4,)
     dropout: float = 0.1
     resample_with_conv: bool = True
 

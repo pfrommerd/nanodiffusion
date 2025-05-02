@@ -29,21 +29,27 @@ class DiffusionModel(GenerativeModel):
     def __init__(self, sample_structure: ty.Any,
             diffuser: "Diffuser",
             train_noise_schedule: Schedule,
-            gen_sigmas: torch.Tensor):
+            gen_sigmas: torch.Tensor, gamma: float, mu: float):
         super().__init__()
+        self.gamma = gamma
+        self.mu = mu
         self.diffuser = diffuser
         self.train_noise_schedule = train_noise_schedule
         self.register_buffer("gen_sigmas", gen_sigmas)
 
     @torch.no_grad()
     def generate(self, sample_structure: ty.Any, cond: ty.Any = None,
-                    gam: float = 1., mu: float = 0.,
+                    gamma: float | None = None, mu: float | None = None,
                     **kwargs) -> ty.Iterator[SampleValue]:
+        gamma = gamma or self.gamma # type: ignore
+        mu = mu or self.mu # type: ignore
+        assert gamma is not None and mu is not None
         was_training = self.training
         self.eval()
         def gen_rand():
             return pytree.tree_map(
-                lambda x: torch.randn_like(x) if isinstance(x, torch.Tensor) else x,
+                lambda x: torch.randn_like(x, device=self.gen_sigmas.device) # type: ignore
+                    if isinstance(x, torch.Tensor) else x,
                 sample_structure
             )
         sigma_init = self.gen_sigmas[0] # type: ignore
@@ -57,7 +63,7 @@ class DiffusionModel(GenerativeModel):
             if cond is not None: pred = self.diffuser(xt, sig, cond=cond, **kwargs)
             else: pred = self.diffuser(xt, sig, **kwargs)
             eps_prev, eps = eps, pred
-            eps_av = (eps * gam + eps_prev * (1-gam)) if eps_prev is not None else eps
+            eps_av = (eps * gamma + eps_prev * (1-gamma)) if eps_prev is not None else eps
             sig_p = (sig_prev/sig**mu)**(1/(1-mu)) # sig_prev == sig**mu sig_p**(1-mu)
             eta = (sig_prev**2 - sig_p**2).sqrt()
             xt = xt - (sig - sig_p) * eps_av + eta * gen_rand()
@@ -134,6 +140,10 @@ class DiffusionModelConfig(ModelConfig):
     sample_timesteps: int
     ideal_denoiser: bool
 
+    sampler_preset: str | None = None
+    gamma: float = 1.
+    mu: float = 0.
+
     @ty.override
     def create(self, data: SizedDataset[DataPoint]) -> DiffusionModel:
         sample_structure = data.data_sample.sample
@@ -147,9 +157,17 @@ class DiffusionModelConfig(ModelConfig):
             diffuser = IdealDiffuser(sample, cond)
         else:
             diffuser = self.nn.create(sample_structure, cond_structure)
+        gamma, mu = self.gamma, self.mu
+        match self.sampler_preset:
+            case "accel": gamma, mu = 2., 0.
+            case "ddim": gamma, mu = 1., 0.
+            case "ddpm": gamma, mu = 1., 0.5
+            case None: ...
+            case _: raise ValueError(f"Unknown sampler preset: {self.sampler_preset}")
         return DiffusionModel(
             sample_structure, diffuser, # type: ignore
-            train_noise_schedule, gen_sigmas
+            train_noise_schedule, gen_sigmas,
+            gamma, mu
         )
 
 class CondEmbedder(nn.Module):
@@ -163,7 +181,11 @@ class CondEmbedder(nn.Module):
             for num_classes in cond_classes
         ])
         self.cond_feature_embed = nn.ModuleList([
-            nn.Linear(num_cond_features, embed_features)
+            nn.Sequential(
+                nn.Linear(num_cond_features, embed_features),
+                nn.SiLU(),
+                nn.Linear(embed_features, embed_features)
+            )
             for num_cond_features in cond_features
         ])
 
