@@ -1,5 +1,6 @@
 program: train
-name: mnist_samples
+project: nanogen_mnist
+name: sampler_data_sweep
 method: grid
 parameters:
     wandb:
@@ -11,12 +12,14 @@ parameters:
     limit_data:
         values: [10_000, 30_000, 45_000, 60_000]
     batch_size:
-        value: 256
+        value: 128
     gen_batch_size:
         value: 64
+    model.diffusion.sample_timesteps:
+        value: 16
     iterations:
         value: 150 # for smoke testing
-        # value: 150_000
+        # value: 200_000
     optimizer.lr:
         value: 0.0005
     data:

@@ -73,7 +73,6 @@ class PipelineConfig(Config):
     gen_interval: int = 1000
 
     iterations: int = 10_000
-    sample_steps: int = 32
 
 T = ty.TypeVar("T", bound=DataPoint)
 
