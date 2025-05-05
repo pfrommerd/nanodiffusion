@@ -27,7 +27,7 @@ dependencies = [
 [project.scripts]
 train = "nanogen.train:main"
 distill = "nanogen.distill:main"
-ot = "nanogen.analysis.sampler_ot:main"
+metrics = "nanogen.analysis.sampler_metrics:main"
 
 [dependency-groups]
 dev = [

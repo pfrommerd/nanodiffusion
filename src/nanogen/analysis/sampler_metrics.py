@@ -19,7 +19,7 @@ import rich.progress
 logger = logging.getLogger(__name__)
 
 @config
-class OTConfig(Config):
+class MetricsConfig(Config):
     artifact: str
     num_samples: int
     batch_size: int
@@ -41,6 +41,7 @@ def data_generator(pipeline, accelerator, samples_per_cond):
             cond_max = pytree.tree_map(torch.maximum, cond_max, batch_max)
     assert cond_min is not None and cond_max is not None
     logger.info("Computed bounds.")
+    model = accelerator.prepare(pipeline.model)
 
     while True:
         cond = pytree.tree_map(
@@ -48,16 +49,27 @@ def data_generator(pipeline, accelerator, samples_per_cond):
                 device=min.device)*(max - min) + min),
             cond_min, cond_max)
         cond_ex = cond.reshape(-1)[None].expand(samples_per_cond, -1)
-        ddpm_samples = pipeline.generate(samples_per_cond,
-                    cond=cond_ex, accelerator=accelerator,
-                    gamma=1.0, mu=0.5).sample
-        ddim_samples = pipeline.generate(samples_per_cond,
-                    cond=cond_ex, accelerator=accelerator,
-                    gamma=1.0, mu=0.).sample
-        accel_samples = pipeline.generate(samples_per_cond,
-                    cond=cond_ex, accelerator=accelerator,
-                    gamma=2.0, mu=0.).sample
-        yield cond, ddpm_samples, ddim_samples, accel_samples
+        sample_structure = pytree.tree_map(
+            lambda x: x[None].expand(samples_per_cond, *x.shape) if isinstance(x, torch.Tensor) else x,
+            pipeline.datapoint.sample
+        )
+        ddpm_samples = list(model.generate(sample_structure,
+                    cond=cond_ex, gamma=1.0, mu=0.5))
+        ddpm_si = np.zeros(len(ddpm_samples))
+        ddpm_samples = ddpm_samples[-1]
+
+        ddim_samples = list(model.generate(sample_structure,
+                    cond=cond_ex, gamma=1.0, mu=0.))
+        ddim_si = np.zeros(len(ddpm_samples))
+        ddim_samples = ddim_samples[-1]
+
+        accel_samples = list(model.generate(sample_structure,
+                    cond=cond_ex, gamma=2.0, mu=0.))
+        accel_si = np.zeros(len(ddpm_samples))
+        accel_samples = accel_samples[-1]
+        yield (cond, (ddpm_samples, ddpm_si),
+            (ddim_samples, ddim_si), (accel_samples, accel_si)
+        )
 
 def distances(samples_A, samples_B):
     samples_A = samples_A.reshape(samples_A.shape[0], -1)
@@ -66,7 +78,7 @@ def distances(samples_A, samples_B):
 
 def _run(experiment: Experiment):
     assert experiment.config is not None
-    config: OTConfig = experiment.config # type: ignore
+    config: MetricsConfig = experiment.config # type: ignore
     accelerator = Accelerator()
     logger.info("Starting OT calculations...")
     if not ":" in config.artifact:
@@ -81,9 +93,11 @@ def _run(experiment: Experiment):
         pipeline = GenerativePipeline.load(f)
 
     rows = []
-    for cond, ddpm_samples, ddim_samples, accel_samples in rich.progress.track(itertools.islice(
+    for (cond, (ddpm_samples, ddpm_si), (ddim_samples, ddim_si),
+                    (accel_samples, accel_si)) in rich.progress.track(itertools.islice(
                 data_generator(pipeline, accelerator, config.batch_size), config.num_samples
             ), total=config.num_samples):
+        cond = cond.cpu().numpy()
         # Process the generated samples here
         # For example, save them to disk or perform some analysis
         C = distances(ddpm_samples, ddim_samples).cpu().numpy()
@@ -92,29 +106,34 @@ def _run(experiment: Experiment):
         ddpm_accel_dist = np.sum(ot.emd([], [], C)*C) # type: ignore
         C = distances(ddim_samples, accel_samples).cpu().numpy()
         ddim_accel_dist = np.sum(ot.emd([], [], C)*C) # type: ignore
-        rows.append({
-            "condition": cond.cpu().numpy(),
-            "ddpm_ddim_dist": ddpm_ddim_dist,
-            "ddpm_accel_dist": ddpm_accel_dist,
-            "ddim_accel_dist": ddim_accel_dist
+        row = {
+            f"condition/{i}": cond[i] for i in range(cond.shape[-1])
+        }
+        row.update({f"ddpm_si/{t}": ddpm_si[t] for t in range(ddpm_si.shape[0])})
+        row.update({f"ddim_si/{t}": ddim_si[t] for t in range(ddim_si.shape[0])})
+        row.update({f"accel_si/{t}": accel_si[t] for t in range(accel_si.shape[0])})
+        row.update({
+            "ddpm_ddim_ot": ddpm_ddim_dist,
+            "ddpm_accel_ot": ddpm_accel_dist,
+            "ddim_accel_ot": ddim_accel_dist
         })
     df = pd.DataFrame(rows)
-    with experiment.create_artifact("ot_results", type="results") as artifact:
-        with artifact.create_file("distances.csv") as f:
+    with experiment.create_artifact("results", type="results") as artifact:
+        with artifact.create_file("metrics.csv") as f:
             df.to_csv(f, index=False)
     experiment.log_table("distances", df)
 
 def main():
-    default = OTConfig(
+    default = MetricsConfig(
         artifact=MISSING,
-        batch_size=256,
-        num_samples=10_000,
+        batch_size=64,
+        num_samples=2_500,
         experiment=ExperimentConfig(
             wandb=True
         )
     )
-    options = Options.as_options(OTConfig, default)
-    config : OTConfig = options.from_parsed(options.parse())
+    options = Options.as_options(MetricsConfig, default)
+    config : MetricsConfig = options.from_parsed(options.parse())
     experiment = config.experiment.create(
         logger=logger,
         config=config,

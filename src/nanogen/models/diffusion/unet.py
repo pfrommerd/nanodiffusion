@@ -227,8 +227,8 @@ class Unet(Diffuser):
 
 @config(variant="unet")
 class UnetConfig(DiffuserConfig):
-    base_channels: int = 32
-    channel_mults: ty.Sequence[int] = (1, 2, 4, 4)
+    base_channels: int = 64
+    channel_mults: ty.Sequence[int] = (1, 2, 2, 2)
     embed_channel_mult: int = 4
     num_res_blocks: int = 2
     attn_resolutions: ty.Sequence[int] = (4,)
