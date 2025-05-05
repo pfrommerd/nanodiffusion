@@ -10,7 +10,7 @@ parameters:
         #model.diffusion.sampler_preset:
         #values: ["ddim", "ddpm", "accel"]
     limit_data:
-        values: [10_000, 30_000, 45_000, 60_000]
+        values: [10_000, 20_000, 30_000, 40_000, 50_000, 60_000]
     batch_size:
         value: 128
     gen_batch_size:
@@ -18,7 +18,7 @@ parameters:
     model.diffusion.sample_timesteps:
         value: 16
     iterations:
-      # value: 150 # for smoke testing
+        # value: 150 # for smoke testing
         value: 150_000
     optimizer.lr:
         value: 0.0005
