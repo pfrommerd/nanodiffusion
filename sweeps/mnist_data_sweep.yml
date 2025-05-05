@@ -19,9 +19,9 @@ parameters:
         value: 16
     iterations:
         # value: 150 # for smoke testing
-        value: 150_000
+        value: 200_000
     optimizer.lr:
-        value: 0.0005
+        value: 0.0003
     data:
         value: mnist
     distill:

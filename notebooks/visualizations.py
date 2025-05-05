@@ -15,6 +15,11 @@ def _():
     import scipy
     import pandas as pd
     import itertools
+    import os
+    import seaborn as sns
+
+    sns.set_theme()
+    plt.rcParams["font.family"] = "serif"
 
     from pathlib import Path
     return Path, np, pd, plt, scipy, wandb
@@ -59,15 +64,16 @@ def _(np):
 
     mnist_data = DataRepository.default().lookup("mnist")
     mnist_data = mnist_data.split("test")
+    mnist_labels = np.concatenate(list(data_utils.as_numpy(batch["class"]) for batch in mnist_data.to_batches(columns=["class"])))
     mnist_data = np.concatenate(list(data_utils.as_numpy(batch["tsne"]) for batch in mnist_data.to_batches(columns=["tsne"])))
-    return (mnist_data,)
+    return mnist_data, mnist_labels
 
 
 @app.cell
 def _(mnist_data, np, scipy):
     def calc_density(sample_points):
         dists = -np.sum(np.square(sample_points[:,None, :] - mnist_data[None,:, :]), axis=-1)
-        dists = dists/50
+        dists = dists/20
         log_pdfs = scipy.special.logsumexp(dists, axis=1)
         log_pdfs -= np.log(10)
         # log_pdfs = log_pdfs - scipy.special.logsumexp(log_pdfs)
@@ -75,21 +81,18 @@ def _(mnist_data, np, scipy):
 
     def calc_smoothed(cond, values):
         dists = -np.sum(np.square(cond[:,None, :] - cond[None,:, :]), axis=-1)
+        dists = dists/20
         return scipy.special.logsumexp(dists, axis=1, b=values)
-    return calc_density, calc_smoothed
+    return (calc_density,)
 
 
 @app.cell
-def _(calc_density, calc_smoothed, data, np):
+def _(calc_density, data, np):
     def transform_densities(data):
         new_data = data.copy(deep=False)
-        cond = np.stack((data["condition_x"], data["condition_y"]), axis=-1)
-        for c in ["ddpm_ddim_dist"]:
-            print("Smoothing", c)
-            new_data[c] = calc_smoothed(cond, new_data[c].to_numpy())
         print("Calculating density...")
+        cond = np.stack((data["condition_x"], data["condition_y"]), axis=-1)
         new_data["density"] = calc_density(cond)
-        # average distances over conditioning points
         return new_data
     transformed_data = transform_densities(data)
     return (transformed_data,)
@@ -109,8 +112,65 @@ def _(calc_density, np, plt):
 
 
 @app.cell
-def _(plt, transformed_data):
-    plt.scatter(transformed_data["condition_x"], transformed_data["condition_y"], c=transformed_data["ddpm_ddim_dist"])
+def _(mnist_data, mnist_labels, np, plt, scipy, transformed_data):
+    def heatmaps(column_name, column_label):
+        from matplotlib.colors import LogNorm
+        colors = [
+            "#4c72b0",  # blue
+            "#dd8452",  # orange
+            "#55a868",  # green
+            "#c44e52",  # red
+            "#8172b2",  # purple
+            "#937860",  # brown
+            "#da8bc3",  # pink
+            "#b07aa1",  # magenta
+            "#ccb974",  # khaki
+            "#64b5cd",  # cyan
+        ]
+        fig, axs = plt.subplots(ncols=3, nrows=1, figsize=(15, 3))
+        cbars = []
+    
+        grid_y, grid_x = np.mgrid[-100:100:100j, -100:100:100j]
+        xs, ys = grid_x[0,:], grid_y[:,0]
+        for i, ((samples, sub_data), ax) in enumerate(zip(transformed_data.groupby("samples"), axs)):
+            # evaluate on a grid
+            cond = np.stack((sub_data["condition_x"], sub_data["condition_y"]), axis=-1)
+            values = scipy.interpolate.griddata(cond, sub_data[column_name].to_numpy(),
+                                                (grid_x, grid_y), method='cubic')[::-1,:]
+            m = ax.imshow(values,cmap="binary", extent=[-100, 100, -100, 100],
+                         vmin=1, vmax=7)
+            ax.scatter(mnist_data[::5,0], mnist_data[::5,1], c=[colors[l] for l in mnist_labels[::5]], s=1)
+            #m = ax.scatter(sub_data["condition_x"], sub_data["condition_y"], c=sub_data["ddpm_ddim_dist"],
+            #               cmap="binary", s=2)
+            ax.grid(False)
+            cbars.append(m)
+            ax.set_xlim([-100, 100])
+            ax.set_ylim([-100, 100])
+            ax.set_xlabel("t-SNE First Component")
+            ax.set_title(f"Conditional MNIST, N={samples}")
+            if i == 0:
+                ax.set_ylabel("t-SNE Second Component")
+        fig.colorbar(cbars[0], ax=axs, label=column_label)
+        return fig
+    _fig = heatmaps("ddpm_ddim_dist", "DDPM/DDIM OT Distance")
+    _fig.savefig("figures/ddpm_ddim_dist.pdf", bbox_inches="tight")
+    _fig
+    return (heatmaps,)
+
+
+@app.cell
+def _(heatmaps):
+    _fig = heatmaps("ddim_accel_dist", "DDIM/IDOP OT Distance")
+    _fig.savefig("figures/ddim_idop_dist.pdf", bbox_inches="tight")
+    _fig
+    return
+
+
+@app.cell
+def _(heatmaps):
+    _fig = heatmaps("ddpm_accel_dist", "DDPM/IDOP OT Distance")
+    _fig.savefig("figures/ddpm_idop_dist.pdf", bbox_inches="tight")
+    _fig
     return
 
 
