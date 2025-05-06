@@ -122,10 +122,10 @@ class IdealDiffuser(Diffuser, smalldiffusion.ModelMixin):
             log_weights += cond_weights
 
         weights = torch.nn.functional.softmax(log_weights, dim=0)
-        eps = torch.einsum('ij,i...->j...', weights, self.samples)                             # shape: xb x c1 x ... x cn
+        x0 = torch.einsum('ij,i...->j...', weights, self.samples)                             # shape: xb x c1 x ... x cn
         sigma = sigma[..., None]
         sigma = sigma.reshape((sigma.shape[0],) + (1,) * len(x.shape[1:]))
-        return (x - eps) / sigma
+        return (x - x0) / sigma
 
 @config
 class DiffuserConfig(abc.ABC):

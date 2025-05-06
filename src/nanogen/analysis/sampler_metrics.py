@@ -15,6 +15,7 @@ import ot
 import pandas as pd
 import numpy as np
 import rich.progress
+import torch.func
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,62 @@ class MetricsConfig(Config):
     num_samples: int
     batch_size: int
     experiment : ExperimentConfig = field(flat=True)
+
+def sq_norm(M, k):
+    return (torch.norm(M, dim=1)**2).unsqueeze(1).repeat(1,k)
+
+def sum_except_dim(x, dim):
+    dims = list(range(x.ndim))
+    dims.remove(dim)
+    return torch.sum(x, dim=dims, keepdim=True)
+
+@torch.compile
+def val_and_div(func, *inputs):
+    value, vjp_fn = torch.func.vjp(
+        lambda input: func(input, *inputs[1:]), inputs[0]) # type: ignore
+    with torch.no_grad():
+        I = torch.eye(inputs[0].nelement(), device=inputs[0].device)
+        I = I.reshape(-1, *inputs[0].shape)
+    def div_elem(v):
+        cv = vjp_fn(v)[0]
+        # print(I.shape, v.shape, cv.shape)
+        return torch.sum(v*cv)
+    div = torch.sum(torch.func.vmap(div_elem, chunk_size=1)(I))
+    return value, div
+
+def measure_si(model, final_samples, inter_samples, sigma) -> torch.Tensor:
+    # For each of the inter samples, compute div
+    pred, div = torch.func.vmap(
+        lambda x: val_and_div(model.diffuser, x[None], sigma),
+        randomness="different", chunk_size=1
+    )(inter_samples)
+    print("measuring si")
+    # compute the "true" expected noise
+    with torch.no_grad():
+        x_flat = inter_samples.flatten(start_dim=1)
+        d_flat = final_samples.flatten(start_dim=1) # type: ignore
+        (xb, xr), (db, dr) = x_flat.shape, d_flat.shape
+        sq_diffs = sq_norm(x_flat, db).T + sq_norm(d_flat, xb) - 2 * d_flat @ x_flat.T # shape: db x xb
+        log_weights = -sq_diffs/2/sigma.squeeze()**2
+        weights = torch.nn.functional.softmax(log_weights, dim=0)
+        x0 = torch.einsum('ij,i...->j...', weights, final_samples)
+        true_exp = (inter_samples - x0) / sigma
+    # The "true" schedule inconsistency is this
+    # scales by dot sigma / sigma * p(x_t)
+    # we use this to make everything noise-scale-invariant
+    # (note the div scales with sigma^(-1), so
+    # multiplying that by sigma should be fine)
+    si = sigma * div - torch.sum(
+        true_exp.reshape(true_exp.shape[0], -1) *
+        pred.reshape(pred.shape[0], -1), dim=1)
+    return si
+
+def measure_si_traj(model, final_samples, inter_samples, sigmas):
+    return torch.zeros(len(inter_samples), device=final_samples.device)
+    # torch.stack([
+    #     measure_si(model, final_samples, s, sigma)
+    #     for (s, sigma) in zip(inter_samples, sigmas)
+    # ], dim=0)
 
 def data_generator(pipeline, accelerator, samples_per_cond):
     logger.info("Computing conditioning bounds...")
@@ -42,7 +99,6 @@ def data_generator(pipeline, accelerator, samples_per_cond):
     assert cond_min is not None and cond_max is not None
     logger.info("Computed bounds.")
     model = accelerator.prepare(pipeline.model)
-
     while True:
         cond = pytree.tree_map(
             lambda min, max: (torch.rand(min.shape,
@@ -55,17 +111,20 @@ def data_generator(pipeline, accelerator, samples_per_cond):
         )
         ddpm_samples = list(model.generate(sample_structure,
                     cond=cond_ex, gamma=1.0, mu=0.5))
-        ddpm_si = np.zeros(len(ddpm_samples))
+        ddpm_si = measure_si_traj(model, ddpm_samples[-1],
+                            ddpm_samples, model.gen_sigmas)
         ddpm_samples = ddpm_samples[-1]
 
         ddim_samples = list(model.generate(sample_structure,
                     cond=cond_ex, gamma=1.0, mu=0.))
-        ddim_si = np.zeros(len(ddpm_samples))
+        ddim_si = measure_si_traj(model, ddim_samples[-1],
+                            ddim_samples, model.gen_sigmas)
         ddim_samples = ddim_samples[-1]
 
         accel_samples = list(model.generate(sample_structure,
                     cond=cond_ex, gamma=2.0, mu=0.))
-        accel_si = np.zeros(len(ddpm_samples))
+        accel_si = measure_si_traj(model, accel_samples[-1],
+                            accel_samples, model.gen_sigmas)
         accel_samples = accel_samples[-1]
         yield (cond, (ddpm_samples, ddpm_si),
             (ddim_samples, ddim_si), (accel_samples, accel_si)
@@ -113,9 +172,9 @@ def _run(experiment: Experiment):
         row.update({f"ddim_si/{t}": ddim_si[t] for t in range(ddim_si.shape[0])})
         row.update({f"accel_si/{t}": accel_si[t] for t in range(accel_si.shape[0])})
         row.update({
-            "ddpm_ddim_ot": ddpm_ddim_dist,
-            "ddpm_accel_ot": ddpm_accel_dist,
-            "ddim_accel_ot": ddim_accel_dist
+            "ddpm_ddim_dist": ddpm_ddim_dist,
+            "ddpm_accel_dist": ddpm_accel_dist,
+            "ddim_accel_dist": ddim_accel_dist
         })
     df = pd.DataFrame(rows)
     with experiment.create_artifact("results", type="results") as artifact:
@@ -127,7 +186,7 @@ def main():
     default = MetricsConfig(
         artifact=MISSING,
         batch_size=64,
-        num_samples=2_500,
+        num_samples=100,
         experiment=ExperimentConfig(
             wandb=True
         )
