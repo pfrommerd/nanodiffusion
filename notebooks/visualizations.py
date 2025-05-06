@@ -28,21 +28,19 @@ def _():
 @app.cell
 def _(wandb):
     api = wandb.Api()
-    sweep = api.sweep("dpfrommer-projects/nanogen_mnist/hsnrxhw0")
+    sweep = api.sweep("dpfrommer-projects/nanogen_mnist/8bgc69t0")
     return (sweep,)
 
 
 @app.cell
-def _(Path, np, pd, sweep):
-    def parse_row(r):
-        r = r.strip("[]")
-        return list(float(v) for v in r.strip("[]").split(r" ") if v)
-
+def _(Path, np, parse_row, pd, sweep):
     def load_data():
         data = []
-        for samples, run in zip([10000, 30000, 45000, 60000], sweep.runs):
+        for samples, run in zip([10000, 20000, 30000, 40000, 50000], sweep.runs):
             artifact = list(a for a in run.logged_artifacts() if a.type == "results")[0]
-            path = Path(artifact.download()) / "distances.csv"
+            path = Path(artifact.download()) / "metrics.csv"
+            with open(path) as f:
+                print(f.read())
             df = pd.read_csv(path)
             cond = df["condition"]
             cond = np.stack(list(parse_row(c) for c in cond))
@@ -129,7 +127,7 @@ def _(mnist_data, mnist_labels, np, plt, scipy, transformed_data):
         ]
         fig, axs = plt.subplots(ncols=3, nrows=1, figsize=(15, 3))
         cbars = []
-    
+
         grid_y, grid_x = np.mgrid[-100:100:100j, -100:100:100j]
         xs, ys = grid_x[0,:], grid_y[:,0]
         for i, ((samples, sub_data), ax) in enumerate(zip(transformed_data.groupby("samples"), axs)):

@@ -195,6 +195,7 @@ def _run(experiment: Experiment):
             "ddpm_accel_dist": ddpm_accel_dist,
             "ddim_accel_dist": ddim_accel_dist
         })
+        rows.append(row)
     df = pd.DataFrame(rows)
     with experiment.create_artifact("results", type="results") as artifact:
         with artifact.create_file("metrics.csv") as f:
