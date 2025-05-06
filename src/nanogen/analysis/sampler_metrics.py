@@ -4,6 +4,7 @@ from nanoconfig import config, Config, field, MISSING
 from nanoconfig.experiment import ExperimentConfig, Experiment
 
 from ..pipeline import GenerativePipeline
+from ..utils import setup_logging
 
 from accelerate import Accelerator
 
@@ -48,18 +49,16 @@ def divergence(y, x):
     return div
 
 def measure_si(model, final_samples, inter_samples, sigma) -> torch.Tensor:
+    orig_shape = inter_samples.shape
+    inter_samples_flat = inter_samples.reshape(inter_samples.shape[0], -1)
+    inter_samples_flat = inter_samples_flat.detach().requires_grad_()
+    pred = model.diffuser(inter_samples_flat.reshape(*orig_shape), sigma)
+    pred = pred.reshape(inter_samples.shape[0], -1)
+    div = divergence(pred, inter_samples_flat).detach()
+    pred = pred.reshape(*orig_shape).detach()
 
-    # orig_shape = inter_samples.shape
-    # inter_samples_flat = inter_samples.reshape(inter_samples.shape[0], -1)
-    # inter_samples_flat = inter_samples_flat.detach().requires_grad_()
-    # pred = model.diffuser(inter_samples_flat.reshape(*orig_shape), sigma)
-    # pred = pred.reshape(inter_samples.shape[0], -1)
-    # div = divergence(pred, inter_samples_flat).detach()
-    # pred = pred.reshape(*orig_shape).detach()
-    #
     with torch.no_grad():
-        pred = model.diffuser(inter_samples, sigma)
-
+        # pred = model.diffuser(inter_samples, sigma)
         x_flat = inter_samples.flatten(start_dim=1)
         d_flat = final_samples.flatten(start_dim=1) # type: ignore
         (xb, xr), (db, dr) = x_flat.shape, d_flat.shape
@@ -73,12 +72,13 @@ def measure_si(model, final_samples, inter_samples, sigma) -> torch.Tensor:
     # we use this to make everything noise-scale-invariant
     # (note the div scales with sigma^(-1), so
     # multiplying that by sigma should be fine)
-    # div_comp = sigma * div
+    div_comp = sigma * div
     dot_comp = torch.sum(true_exp.reshape(true_exp.shape[0], -1) *
-            (pred - true_exp).reshape(pred.shape[0], -1), dim=1) / sigma
-    # si = div_comp + dot_comp
+            (pred - true_exp).reshape(pred.shape[0], -1), dim=1)
+    si = div_comp + dot_comp
     # print(div_comp, dot_comp, si, si.abs().mean())
-    si = dot_comp.abs().mean()
+    si = si.abs().mean()
+    # si = si.abs().sqrt().mean().square()
     return si
 
 def measure_si_traj(model, final_samples, inter_samples, sigmas):
@@ -160,10 +160,10 @@ def _run(experiment: Experiment):
         pipeline = GenerativePipeline.load(f)
 
     rows = []
-    for (cond, (ddpm_samples, ddpm_si), (ddim_samples, ddim_si),
-                    (accel_samples, accel_si)) in rich.progress.track(itertools.islice(
+    for i, (cond, (ddpm_samples, ddpm_si), (ddim_samples, ddim_si),
+                    (accel_samples, accel_si)) in enumerate(rich.progress.track(itertools.islice(
                 data_generator(pipeline, accelerator, config.batch_size), config.num_samples
-            ), total=config.num_samples):
+            ), total=config.num_samples)):
         cond = pytree.tree_map(
             lambda x: x.cpu().numpy() if isinstance(x, torch.Tensor) else x,
             cond
@@ -200,6 +200,9 @@ def _run(experiment: Experiment):
             "ddim_accel_dist": ddim_accel_dist
         })
         rows.append(row)
+        if i % 10 == 0:
+            for (k, v) in row.items():
+                logger.info(f"{i}: {k}: {v}")
     df = pd.DataFrame(rows)
     with experiment.create_artifact("results", type="results") as artifact:
         with artifact.create_file("metrics.csv") as f:
@@ -207,6 +210,7 @@ def _run(experiment: Experiment):
     experiment.log_table("distances", df)
 
 def main():
+    setup_logging()
     default = MetricsConfig(
         artifact=MISSING,
         batch_size=64,

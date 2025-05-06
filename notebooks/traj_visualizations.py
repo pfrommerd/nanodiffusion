@@ -205,7 +205,7 @@ def _(calc_density, np, pd, plt, transformed_data):
         xs, ys = grid_x[0,:], grid_y[:,0]
         density = calc_density(np.stack((grid_x.reshape(-1), grid_y.reshape(-1)), -1))
         density = density.reshape(grid_x.shape)/bin_values.max()
-    
+
         m = ax_density.imshow(density[::-1,:],cmap="Blues", extent=[-100, 100, -100, 100])
         ax_density.grid(False)
         ax_density.set_ylabel("t-SNE Second Component")
@@ -226,7 +226,7 @@ def _(np, pd, plt, scipy, transformed_data):
         main_col = cols[1]
         for samples, samples_data in transformed_data.groupby("samples"):
             samples_data = samples_data.copy(deep=False)
-        
+
             samples_data = samples_data[samples_data["density"] > 0.1]
             density = np.log(samples_data["density"].to_numpy())
             labels, bins = pd.cut(density, 10, retbins=True)
@@ -249,7 +249,7 @@ def _(np, pd, plt, scipy, transformed_data):
 
         ax_scat.scatter(sub_data["density"], sub_data["ddpm_si/1"], alpha=0.2, s=1)
         ax_scat_comp.scatter(sub_data["ddpm_si/1"], sub_data["ddpm_ddim_dist"], alpha=0.2, s=1)
-    
+
         grid_y, grid_x = np.mgrid[-100:100:100j, -100:100:100j]
         xs, ys = grid_x[0,:], grid_y[:,0]
         cond = np.stack((sub_data["condition/0"], sub_data["condition/1"]), axis=-1)
