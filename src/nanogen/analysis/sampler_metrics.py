@@ -187,7 +187,6 @@ def _run(experiment: Experiment):
                 f"condition/{i}": cond[i] for i in range(cond.shape[-1])
             })
         else:
-            print(cond)
             for key, value in cond.items():
                 row.update({
                     f"condition/{key}/{i}": cond[key][i] for i in range(cond[key].shape[-1])
