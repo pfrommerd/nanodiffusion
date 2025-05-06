@@ -110,7 +110,9 @@ def data_generator(pipeline, accelerator, samples_per_cond):
             lambda min, max: (torch.rand(min.shape,
                 device=min.device)*(max - min) + min),
             cond_min, cond_max)
-        cond_ex = cond.reshape(-1)[None].expand(samples_per_cond, -1)
+        cond_ex = pytree.tree_map(
+            lambda x: x.reshape(-1)[None].expand(samples_per_cond, -1), cond
+        )
         sample_structure = pytree.tree_map(
             lambda x: x[None].expand(samples_per_cond, *x.shape) if isinstance(x, torch.Tensor) else x,
             pipeline.datapoint.sample
@@ -162,7 +164,10 @@ def _run(experiment: Experiment):
                     (accel_samples, accel_si)) in rich.progress.track(itertools.islice(
                 data_generator(pipeline, accelerator, config.batch_size), config.num_samples
             ), total=config.num_samples):
-        cond = cond.cpu().numpy()
+        cond = pytree.tree_map(
+            lambda x: x.cpu().numpy() if isinstance(x, torch.Tensor) else x,
+            cond
+        )
         # Process the generated samples here
         # For example, save them to disk or perform some analysis
         C = distances(ddpm_samples, ddim_samples).cpu().numpy()
@@ -171,9 +176,17 @@ def _run(experiment: Experiment):
         ddpm_accel_dist = np.sum(ot.emd([], [], C)*C) # type: ignore
         C = distances(ddim_samples, accel_samples).cpu().numpy()
         ddim_accel_dist = np.sum(ot.emd([], [], C)*C) # type: ignore
-        row = {
-            f"condition/{i}": cond[i] for i in range(cond.shape[-1])
-        }
+
+        row = {}
+        if isinstance(cond, torch.Tensor):
+            row.update({
+                f"condition/{i}": cond[i] for i in range(cond.shape[-1])
+            })
+        else:
+            for key, value in cond.items():
+                row.update({
+                    f"condition/{key}/{i}": cond[key][i] for i in range(cond[key].shape[-1])
+                })
         row.update({f"ddpm_si/{t}": ddpm_si[t] for t in range(ddpm_si.shape[0])})
         row.update({f"ddim_si/{t}": ddim_si[t] for t in range(ddim_si.shape[0])})
         row.update({f"accel_si/{t}": accel_si[t] for t in range(accel_si.shape[0])})

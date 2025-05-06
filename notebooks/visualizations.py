@@ -160,7 +160,7 @@ def _(mnist_data, mnist_labels, np, plt, scipy, transformed_data):
 
 @app.cell
 def _(heatmaps):
-    _fig = heatmaps("ddim_accel_dist", "DDIM/IDOP OT Distance")
+    _fig = heatmaps("ddim_accel_dist", "DDIM/GE OT Distance")
     _fig.savefig("figures/ddim_idop_dist.pdf", bbox_inches="tight")
     _fig
     return
@@ -168,7 +168,7 @@ def _(heatmaps):
 
 @app.cell
 def _(heatmaps):
-    _fig = heatmaps("ddpm_accel_dist", "DDPM/IDOP OT Distance")
+    _fig = heatmaps("ddpm_accel_dist", "DDPM/GE OT Distance")
     _fig.savefig("figures/ddpm_idop_dist.pdf", bbox_inches="tight")
     _fig
     return

@@ -1,0 +1,22 @@
+program: metrics
+project: nanogen_trajectory
+name: sampler_data_sweep
+method: grid
+parameters:
+    wandb:
+        value: true
+    batch_size:
+        value: 128
+    num_samples:
+        value: 10_000
+    artifact:
+        values:
+            - dpfrommer-projects/nanogen_trajectory/diffuser:v10
+            - dpfrommer-projects/nanogen_trajectory/diffuser:v11
+            - dpfrommer-projects/nanogen_trajectory/diffuser:v12
+            - dpfrommer-projects/nanogen_trajectory/diffuser:v13
+            - dpfrommer-projects/nanogen_trajectory/diffuser:v14
+command:
+    - ${env}
+    - ${program}
+    - ${args}
