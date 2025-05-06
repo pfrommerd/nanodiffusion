@@ -168,6 +168,10 @@ def _run(experiment: Experiment):
             lambda x: x.cpu().numpy() if isinstance(x, torch.Tensor) else x,
             cond
         )
+        ddpm_si, ddim_si, accel_si = (
+            ddpm_si.cpu().numpy(), ddim_si.cpu().numpy(),
+            accel_si.cpu().numpy()
+        )
         # Process the generated samples here
         # For example, save them to disk or perform some analysis
         C = distances(ddpm_samples, ddim_samples).cpu().numpy()
@@ -178,11 +182,12 @@ def _run(experiment: Experiment):
         ddim_accel_dist = np.sum(ot.emd([], [], C)*C) # type: ignore
 
         row = {}
-        if isinstance(cond, torch.Tensor):
+        if isinstance(cond, (torch.Tensor,np.ndarray)):
             row.update({
                 f"condition/{i}": cond[i] for i in range(cond.shape[-1])
             })
         else:
+            print(cond)
             for key, value in cond.items():
                 row.update({
                     f"condition/{key}/{i}": cond[key][i] for i in range(cond[key].shape[-1])
