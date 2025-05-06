@@ -48,8 +48,6 @@ def divergence(y, x):
     return div
 
 def measure_si(model, final_samples, inter_samples, sigma) -> torch.Tensor:
-    # compute the "true" expected noise
-    pred = model.diffuser(inter_samples, sigma)
 
     # orig_shape = inter_samples.shape
     # inter_samples_flat = inter_samples.reshape(inter_samples.shape[0], -1)
@@ -60,6 +58,8 @@ def measure_si(model, final_samples, inter_samples, sigma) -> torch.Tensor:
     # pred = pred.reshape(*orig_shape).detach()
     #
     with torch.no_grad():
+        pred = model.diffuser(inter_samples, sigma)
+
         x_flat = inter_samples.flatten(start_dim=1)
         d_flat = final_samples.flatten(start_dim=1) # type: ignore
         (xb, xr), (db, dr) = x_flat.shape, d_flat.shape
@@ -75,14 +75,14 @@ def measure_si(model, final_samples, inter_samples, sigma) -> torch.Tensor:
     # multiplying that by sigma should be fine)
     # div_comp = sigma * div
     dot_comp = torch.sum(true_exp.reshape(true_exp.shape[0], -1) *
-            (pred - true_exp).reshape(pred.shape[0], -1), dim=1)
+            (pred - true_exp).reshape(pred.shape[0], -1), dim=1) / sigma
     # si = div_comp + dot_comp
     # print(div_comp, dot_comp, si, si.abs().mean())
     si = dot_comp.abs().mean()
     return si
 
 def measure_si_traj(model, final_samples, inter_samples, sigmas):
-    return torch.zeros(len(inter_samples), device=final_samples.device)
+    # return torch.zeros(len(inter_samples), device=final_samples.device)
     return torch.stack([
         measure_si(model, final_samples, s, sigma)
         for (s, sigma) in zip(inter_samples[::4], sigmas[::4])
