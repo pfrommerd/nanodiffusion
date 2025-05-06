@@ -34,28 +34,31 @@ def sum_except_dim(x, dim):
     dims.remove(dim)
     return torch.sum(x, dim=dims, keepdim=True)
 
-@torch.compile
-def val_and_div(func, *inputs):
-    value, vjp_fn = torch.func.vjp(
-        lambda input: func(input, *inputs[1:]), inputs[0]) # type: ignore
-    with torch.no_grad():
-        I = torch.eye(inputs[0].nelement(), device=inputs[0].device)
-        I = I.reshape(-1, *inputs[0].shape)
-    def div_elem(v):
-        cv = vjp_fn(v)[0]
-        # print(I.shape, v.shape, cv.shape)
-        return torch.sum(v*cv)
-    div = torch.sum(torch.func.vmap(div_elem, chunk_size=1)(I))
-    return value, div
+def divergence(y, x):
+    div = 0.
+    # do a "randomized" divergence
+    if y.shape[-1] > 32:
+        for i in torch.randint(low=0,high=y.shape[-1], size=(32,)):
+            div += torch.autograd.grad(y[..., i], x,
+                torch.ones_like(y[..., i]), retain_graph=True)[0][..., i]
+    else:
+        for i in range(y.shape[-1]):
+            div += torch.autograd.grad(y[..., i], x,
+                torch.ones_like(y[..., i]), retain_graph=True)[0][..., i]
+    return div
 
 def measure_si(model, final_samples, inter_samples, sigma) -> torch.Tensor:
-    # For each of the inter samples, compute div
-    pred, div = torch.func.vmap(
-        lambda x: val_and_div(model.diffuser, x[None], sigma),
-        randomness="different", chunk_size=1
-    )(inter_samples)
-    print("measuring si")
     # compute the "true" expected noise
+    pred = model.diffuser(inter_samples, sigma)
+
+    # orig_shape = inter_samples.shape
+    # inter_samples_flat = inter_samples.reshape(inter_samples.shape[0], -1)
+    # inter_samples_flat = inter_samples_flat.detach().requires_grad_()
+    # pred = model.diffuser(inter_samples_flat.reshape(*orig_shape), sigma)
+    # pred = pred.reshape(inter_samples.shape[0], -1)
+    # div = divergence(pred, inter_samples_flat).detach()
+    # pred = pred.reshape(*orig_shape).detach()
+    #
     with torch.no_grad():
         x_flat = inter_samples.flatten(start_dim=1)
         d_flat = final_samples.flatten(start_dim=1) # type: ignore
@@ -70,17 +73,20 @@ def measure_si(model, final_samples, inter_samples, sigma) -> torch.Tensor:
     # we use this to make everything noise-scale-invariant
     # (note the div scales with sigma^(-1), so
     # multiplying that by sigma should be fine)
-    si = sigma * div - torch.sum(
-        true_exp.reshape(true_exp.shape[0], -1) *
-        pred.reshape(pred.shape[0], -1), dim=1)
+    # div_comp = sigma * div
+    dot_comp = torch.sum(true_exp.reshape(true_exp.shape[0], -1) *
+            (pred - true_exp).reshape(pred.shape[0], -1), dim=1)
+    # si = div_comp + dot_comp
+    # print(div_comp, dot_comp, si, si.abs().mean())
+    si = dot_comp.abs().mean()
     return si
 
 def measure_si_traj(model, final_samples, inter_samples, sigmas):
     return torch.zeros(len(inter_samples), device=final_samples.device)
-    # torch.stack([
-    #     measure_si(model, final_samples, s, sigma)
-    #     for (s, sigma) in zip(inter_samples, sigmas)
-    # ], dim=0)
+    return torch.stack([
+        measure_si(model, final_samples, s, sigma)
+        for (s, sigma) in zip(inter_samples[::4], sigmas[::4])
+    ], dim=0)
 
 def data_generator(pipeline, accelerator, samples_per_cond):
     logger.info("Computing conditioning bounds...")

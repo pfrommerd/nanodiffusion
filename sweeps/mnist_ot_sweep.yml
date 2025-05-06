@@ -1,16 +1,22 @@
-program: ot
+program: metrics
 project: nanogen_mnist
 name: sampler_data_sweep
 method: grid
 parameters:
     wandb:
         value: true
+    batch_size:
+        value: 128
+    num_samples:
+        value: 10_000
     artifact:
         values:
-            - dpfrommer-projects/nanogen_mnist/diffuser:v15
-            - dpfrommer-projects/nanogen_mnist/diffuser:v16
-            - dpfrommer-projects/nanogen_mnist/diffuser:v17
-            - dpfrommer-projects/nanogen_mnist/diffuser:v18
+            - dpfrommer-projects/nanogen_mnist/diffuser:v19
+            - dpfrommer-projects/nanogen_mnist/diffuser:v20
+            - dpfrommer-projects/nanogen_mnist/diffuser:v21
+            - dpfrommer-projects/nanogen_mnist/diffuser:v22
+            - dpfrommer-projects/nanogen_mnist/diffuser:v23
+            - dpfrommer-projects/nanogen_mnist/diffuser:v24
 command:
     - ${env}
     - ${program}
