@@ -36,10 +36,10 @@ def sum_except_dim(x, dim):
     return torch.sum(x, dim=dims, keepdim=True)
 
 def divergence(y, x) -> torch.Tensor:
-    div = 0.
+    div : torch.Tensor = 0. # type: ignore
     # do a "randomized" divergence
-    if y.shape[-1] > 32:
-        for i in torch.randint(low=0,high=y.shape[-1], size=(32,)):
+    if y.shape[-1] > 16:
+        for i in torch.randint(low=0,high=y.shape[-1], size=(16,)):
             div += torch.autograd.grad(y[..., i], x,
                 torch.ones_like(y[..., i]), retain_graph=True)[0][..., i]
     else:
@@ -48,17 +48,19 @@ def divergence(y, x) -> torch.Tensor:
                 torch.ones_like(y[..., i]), retain_graph=True)[0][..., i]
     return div
 
-def measure_si(model, final_samples, inter_samples, sigma) -> torch.Tensor:
-    orig_shape = inter_samples.shape
-    inter_samples_flat = inter_samples.reshape(inter_samples.shape[0], -1)
-    inter_samples_flat = inter_samples_flat.detach().requires_grad_()
-    pred = model.diffuser(inter_samples_flat.reshape(*orig_shape), sigma)
-    pred = pred.reshape(inter_samples.shape[0], -1)
-    div = divergence(pred, inter_samples_flat).detach()
-    pred = pred.reshape(*orig_shape).detach()
+def measure_si(model, final_samples, sigma) -> torch.Tensor:
+    inter_samples = model.generate_forward(final_samples, sigma)
+
+    # orig_shape = inter_samples.shape
+    # inter_samples_flat = inter_samples.reshape(inter_samples.shape[0], -1)
+    # inter_samples_flat = inter_samples_flat.detach().requires_grad_()
+    # pred = model.diffuser(inter_samples_flat.reshape(*orig_shape), sigma)
+    # pred = pred.reshape(inter_samples.shape[0], -1)
+    # div = divergence(pred, inter_samples_flat).detach()
+    # pred = pred.reshape(*orig_shape).detach()
 
     with torch.no_grad():
-        # pred = model.diffuser(inter_samples, sigma)
+        pred = model.diffuser(inter_samples, sigma)
         x_flat = inter_samples.flatten(start_dim=1)
         d_flat = final_samples.flatten(start_dim=1) # type: ignore
         (xb, xr), (db, dr) = x_flat.shape, d_flat.shape
@@ -67,25 +69,26 @@ def measure_si(model, final_samples, inter_samples, sigma) -> torch.Tensor:
         weights = torch.nn.functional.softmax(log_weights, dim=0)
         x0 = torch.einsum('ij,i...->j...', weights, final_samples)
         true_exp = (inter_samples - x0) / sigma
-    # The "true" schedule inconsistency is this
+        # The "true" schedule inconsistency is this
     # scales by dot sigma / sigma * p(x_t)
     # we use this to make everything noise-scale-invariant
     # (note the div scales with sigma^(-1), so
     # multiplying that by sigma should be fine)
-    div_comp = sigma * div
+    # div_comp = sigma * div
     dot_comp = torch.sum(true_exp.reshape(true_exp.shape[0], -1) *
             (pred - true_exp).reshape(pred.shape[0], -1), dim=1)
-    si = div_comp + dot_comp
+    # si = div_comp + dot_comp
+    si = dot_comp
     # print(div_comp, dot_comp, si, si.abs().mean())
     si = si.abs().mean()
     # si = si.abs().sqrt().mean().square()
     return si
 
-def measure_si_traj(model, final_samples, inter_samples, sigmas):
+def measure_si_traj(model, final_samples, sigmas):
     # return torch.zeros(len(inter_samples), device=final_samples.device)
     return torch.stack([
-        measure_si(model, final_samples, s, sigma)
-        for (s, sigma) in zip(inter_samples[::4], sigmas[::4])
+        measure_si(model, final_samples, sigma)
+        for sigma in sigmas[::4]
     ], dim=0)
 
 def data_generator(pipeline, accelerator, samples_per_cond):
@@ -119,20 +122,17 @@ def data_generator(pipeline, accelerator, samples_per_cond):
         )
         ddpm_samples = list(model.generate(sample_structure,
                     cond=cond_ex, gamma=1.0, mu=0.5))
-        ddpm_si = measure_si_traj(model, ddpm_samples[-1],
-                            ddpm_samples, model.gen_sigmas)
+        ddpm_si = measure_si_traj(model, ddpm_samples[-1], model.gen_sigmas)
         ddpm_samples = ddpm_samples[-1]
 
         ddim_samples = list(model.generate(sample_structure,
                     cond=cond_ex, gamma=1.0, mu=0.))
-        ddim_si = measure_si_traj(model, ddim_samples[-1],
-                            ddim_samples, model.gen_sigmas)
+        ddim_si = measure_si_traj(model, ddim_samples[-1], model.gen_sigmas)
         ddim_samples = ddim_samples[-1]
 
         accel_samples = list(model.generate(sample_structure,
                     cond=cond_ex, gamma=2.0, mu=0.))
-        accel_si = measure_si_traj(model, accel_samples[-1],
-                            accel_samples, model.gen_sigmas)
+        accel_si = measure_si_traj(model, accel_samples[-1], model.gen_sigmas)
         accel_samples = accel_samples[-1]
         yield (cond, (ddpm_samples, ddpm_si),
             (ddim_samples, ddim_si), (accel_samples, accel_si)
@@ -200,7 +200,7 @@ def _run(experiment: Experiment):
             "ddim_accel_dist": ddim_accel_dist
         })
         rows.append(row)
-        if i % 10 == 0:
+        if i % 100 == 0:
             for (k, v) in row.items():
                 logger.info(f"{i}: {k}: {v}")
     df = pd.DataFrame(rows)

@@ -52,9 +52,9 @@ def _():
 @app.cell
 def _(Data, SplitInfo, ds, hashlib, nr, pa):
     def create_ds():
-        cond = nr.choice([-1, 1], size=(2048,))
-        value = nr.choice([0.3, 0.8], size=(2048,))*(cond + 1)/2 + 0.2
-        value = value + nr.normal(loc=0, scale=0.03,size=(2048,))
+        cond = nr.choice([0, 1], size=(2048,))
+        value = nr.choice([0.3, 0.8], size=(2048,))*cond + 0.2
+        value = value + nr.normal(loc=0, scale=0.05,size=(2048,))
         return ds.dataset(pa.table([cond,value],
             schema=pa.schema([
                 pa.field("x", pa.float32()),
@@ -131,10 +131,16 @@ def _(
 
 
 @app.cell
+def _(pipeline):
+    pipeline.train_data.head(128).to_result()
+    return
+
+
+@app.cell
 def _(np, pipeline, torch):
     # Generate intermediate samples
     def gen_samples():
-        cond = torch.tensor(np.random.uniform(size=(1024,1),low=-1,high=1).astype(np.float32)).to("cuda")
+        cond = torch.tensor(np.random.uniform(size=(1024,1),low=0,high=1).astype(np.float32)).to("cuda")
         values = pipeline.generate(cond=cond).sample
         return torch.concatenate((cond,values), -1)
     samples = gen_samples().cpu().numpy()

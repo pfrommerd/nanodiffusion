@@ -71,6 +71,21 @@ class DiffusionModel(GenerativeModel):
         if was_training:
             self.train()
 
+    @torch.no_grad()
+    def generate_forward(self, sample: ty.Any, sigma: float | torch.Tensor):
+        if not isinstance(sigma, torch.Tensor):
+            sigma = torch.tensor(sigma).to(self.gen_sigmas.device) # type: ignore
+        assert isinstance(sigma, torch.Tensor)
+        sigma = sigma[None]
+        eps = pytree.tree_map(
+            lambda x: torch.randn_like(x) if isinstance(x, torch.Tensor) else x,
+            sample
+        )
+        return pytree.tree_map(
+            lambda x, e: x + sigma.reshape((sigma.shape[0],) + (1,)*(len(e.shape) - 1)) * e,
+            sample, eps
+        )
+
     def loss(self, sample: ty.Any, cond: ty.Any = None,
                     loss_type = nn.MSELoss):
         schedule = self.train_noise_schedule

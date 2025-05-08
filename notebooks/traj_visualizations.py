@@ -28,27 +28,28 @@ def _():
 @app.cell
 def _(wandb):
     api = wandb.Api()
-    sweep = api.sweep("dpfrommer-projects/nanogen_trajectory/jjvtd35r")
-    return (sweep,)
+    return
 
 
-@app.cell(hide_code=True)
-def _(Path, pd, sweep):
-    def load_data():
+@app.cell
+def _(Path, pd, wandb):
+    #sweep = api.sweep("dpfrommer-projects/nanogen_trajectory/jjvtd35r")
+    #artifacts = list(list(a for a in run.logged_artifacts() if a.type == "results")[0]
+    #                for run in sweep.runs if list(a for a in run.logged_artifacts() if a.type == "results"))
+    run = wandb.init()
+    artifacts = [run.use_artifact("dpfrommer-projects/nanogen-.venv_bin/results:v3")]
+    def load_data(artifacts):
         data = []
-        for run in sweep.runs:
-            artifact = list(a for a in run.logged_artifacts() if a.type == "results")
-            if not artifact:
-                continue
+        for artifact in artifacts:
+            run = artifact.logged_by()
             input_artifact = list(a for a in run.used_artifacts() if a.type == "model")[0]
             samples = input_artifact.logged_by().config["pipeline"]["limit_data"]
-            artifact = artifact[0]
             path = Path(artifact.download()) / "metrics.csv"
             df = pd.read_csv(path)
             df["samples"] = samples
             data.append(df)
         return pd.concat(data)
-    data = load_data()
+    data = load_data(artifacts)
     data
     return (data,)
 
@@ -82,7 +83,7 @@ def _(calc_density, data, np):
     def transform_densities(data):
         new_data = data.copy(deep=False)
         print("Calculating density...")
-        cond = np.stack((data["condition/start/0"], data["condition/start/1"]), axis=-1)
+        cond = np.stack((data["condition/0"], data["condition/1"]), axis=-1)
         new_data["density"] = calc_density(cond)
         return new_data
     transformed_data = transform_densities(data)
@@ -104,7 +105,7 @@ def _(calc_density, np, plt):
 
 @app.cell
 def _(data, plt):
-    plt.scatter(data["condition/start/0"], data["condition/start/1"], c=data["ddpm_ddim_dist"], s=1)
+    plt.scatter(data["condition/0"], data["condition/1"], c=data["ddpm_ddim_dist"], s=1)
     plt.colorbar()
     plt.show()
     return
@@ -114,18 +115,6 @@ def _(data, plt):
 def _(np, plt, scipy, transformed_data):
     def heatmaps(column_name, column_label):
         from matplotlib.colors import LogNorm
-        colors = [
-            "#4c72b0",  # blue
-            "#dd8452",  # orange
-            "#55a868",  # green
-            "#c44e52",  # red
-            "#8172b2",  # purple
-            "#937860",  # brown
-            "#da8bc3",  # pink
-            "#b07aa1",  # magenta
-            "#ccb974",  # khaki
-            "#64b5cd",  # cyan
-        ]
         fig, axs = plt.subplots(ncols=3, nrows=1, figsize=(15, 3))
         cbars = []
 
@@ -133,7 +122,7 @@ def _(np, plt, scipy, transformed_data):
         xs, ys = grid_x[0,:], grid_y[:,0]
         for i, ((samples, sub_data), ax) in enumerate(zip(transformed_data.groupby("samples"), axs)):
             # evaluate on a grid
-            cond = np.stack((sub_data["condition/start/0"], sub_data["condition/start/1"]), axis=-1)
+            cond = np.stack((sub_data["condition/0"], sub_data["condition/1"]), axis=-1)
             values = scipy.interpolate.griddata(cond, sub_data[column_name].to_numpy(),
                                                 (grid_x, grid_y), method='cubic')[::-1,:]
             m = ax.imshow(values,cmap="binary", extent=[-1, 1, -1, 1],
