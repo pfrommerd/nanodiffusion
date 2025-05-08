@@ -10,7 +10,7 @@ parameters:
         #model.diffusion.sampler_preset:
         #values: ["ddim", "ddpm", "accel"]
     limit_data:
-        values: [1_000, 2_000, 3_000, 4_000]
+        values: [1_000, 2_000, 4_000, 6_000, 8_000]
     batch_size:
         value: 128
     gen_batch_size:

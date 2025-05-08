@@ -244,7 +244,7 @@ class GenerativePipeline(ty.Generic[T]):
             train_gen_loader = utils.cycle(train_gen_loader)
 
         if experiment:
-            sample_batch : T = next(test_gen_loader)
+            sample_batch : T = next(test_gen_loader) if test_gen_loader is not None else next(test_loader)
             experiment.log({
                 "samples" : sample_batch.to_result()
             }, series="gt")

@@ -118,7 +118,7 @@ class Point(DataPoint):
     @staticmethod
     def from_dataset(dataset: ds.Dataset) -> "ty.Iterator[Point]":
         mime_type = dataset.schema.metadata.get(b"mime_type", "").decode()
-        conditional = mime_type == b"parquet/conditional_planar"
+        conditional = mime_type == "data/cond_point"
         has_y = "y" in dataset.schema.names
         has_z = "z" in dataset.schema.names
 
@@ -127,7 +127,7 @@ class Point(DataPoint):
             tensors.append(torch.tensor(data_utils.as_numpy(batches["x"]).copy()))
             if has_y: tensors.append(torch.tensor(data_utils.as_numpy(batches["y"]).copy()))
             if has_z: tensors.append(torch.tensor(data_utils.as_numpy(batches["z"]).copy()))
-            if conditional: cond = tensors.pop(0)
+            if conditional: cond = tensors.pop(0)[:,None]
             else: cond = None
             value = torch.stack(tensors, dim=-1)
             yield Point(cond, value)
@@ -135,7 +135,7 @@ class Point(DataPoint):
 pytree.register_pytree_node(
     Point,
     lambda planar: ([planar.cond_, planar.value_], None),
-    lambda children, _: Planar(children[0], children[1]) # type: ignore
+    lambda children, _: Point(children[0], children[1]) # type: ignore
 )
 
 @dataclass
@@ -287,6 +287,7 @@ def register_types(adapter: TorchAdapter[DataPoint]):
     adapter.register_type("data/trajectory", Trajectory.from_dataset)
     adapter.register_type("data/image", Image.from_dataset)
     adapter.register_type("data/point", Point.from_dataset)
+    adapter.register_type("data/cond_point", Point.from_dataset)
 
 class Visualizer(DataVisualizer):
     def __init__(self, override_mime_type: str | None = None):
