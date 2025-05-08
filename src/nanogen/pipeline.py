@@ -58,7 +58,7 @@ class PipelineConfig(Config):
     model: ModelConfig
     optimizer : OptimizerConfig
     # Aliases or sha of the different datasets to use
-    data: str
+    data: str | None = None
     # Override the data type
     data_type: str | None = None
     # Limit the number of training samples to use
@@ -115,16 +115,19 @@ class GenerativePipeline(ty.Generic[T]):
     def from_config(config: PipelineConfig,
                 create_optimizer: bool = True,
                 data_adapter: TorchAdapter[T] | None = None,
-                data_repo: DataRepository | None = None) -> "GenerativePipeline[T]":
-        if data_repo is None:
-            data_repo = DataRepository.default()
+                data_repo: DataRepository | None = None,
+                data: Data | None = None) -> "GenerativePipeline[T]":
+        if data is None:
+            assert config.data is not None
+            if data_repo is None:
+                data_repo = DataRepository.default()
+            data = data_repo.lookup(config.data)
+        if data is None:
+            raise ValueError(f"Data not found: {config.data}")
         if data_adapter is None:
             data_adapter = TorchAdapter(override_mime_type=config.data_type)
             from .data import register_types
             register_types(data_adapter) # type: ignore
-        data = data_repo.lookup(config.data)
-        if data is None:
-            raise ValueError(f"Data not found: {config.data}")
         # Set the data to sha256 of the data
         config = replace(config, data=data.sha256)
         train_data = data.split("train", data_adapter)

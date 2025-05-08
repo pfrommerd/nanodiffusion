@@ -7,10 +7,10 @@ parameters:
         value: true
     teacher_artifact:
         values:
-            - dpfrommer-projects/nanogen_trajectory/diffuser:v6
-            - dpfrommer-projects/nanogen_trajectory/diffuser:v7
-            - dpfrommer-projects/nanogen_trajectory/diffuser:v8
-            - dpfrommer-projects/nanogen_trajectory/diffuser:v9
+            - dpfrommer-projects/nanogen_trajectory/diffuser:v15
+            - dpfrommer-projects/nanogen_trajectory/diffuser:v16
+            - dpfrommer-projects/nanogen_trajectory/diffuser:v17
+            - dpfrommer-projects/nanogen_trajectory/diffuser:v18
     sampler_preset:
         values:
             - ddim

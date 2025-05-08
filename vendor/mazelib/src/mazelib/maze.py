@@ -34,7 +34,6 @@ class Cell:
         self.row = row
         self.col = col
         self.walls = Walls()
-        self.neighbors = list()
 
     @property
     def loc(self) -> tuple[int, int]:
@@ -45,15 +44,41 @@ class Cell:
         def _generate():
             if self.row > 0:
                 yield self.maze.grid[self.row - 1][self.col]
-            if self.row < self.maze.num_rows - 1:
-                yield self.maze.grid[self.row + 1][self.col]
             if self.col > 0:
                 yield self.maze.grid[self.row][self.col - 1]
+            if self.row < self.maze.num_rows - 1:
+                yield self.maze.grid[self.row + 1][self.col]
             if self.col < self.maze.num_cols - 1:
                 yield self.maze.grid[self.row][self.col + 1]
         return list(_generate())
 
-    def is_neighbor(self, neighbor: "Cell"):
+    @property
+    def reachable_neighbors(self):
+        def _generate():
+            if self.row > 0 and not self.walls.top:
+                yield self.maze.grid[self.row - 1][self.col]
+            if self.col > 0 and not self.walls.left:
+                yield self.maze.grid[self.row][self.col - 1]
+            if self.row < self.maze.num_rows - 1 and not self.walls.bottom:
+                yield self.maze.grid[self.row + 1][self.col]
+            if self.col < self.maze.num_cols - 1 and not self.walls.right:
+                yield self.maze.grid[self.row][self.col + 1]
+        return list(_generate())
+
+    @property
+    def unreachable_neighbors(self):
+        def _generate():
+            if self.row > 0 and self.walls.top:
+                yield self.maze.grid[self.row - 1][self.col]
+            if self.col > 0 and self.walls.left:
+                yield self.maze.grid[self.row][self.col - 1]
+            if self.row < self.maze.num_rows - 1 and self.walls.bottom:
+                yield self.maze.grid[self.row + 1][self.col]
+            if self.col < self.maze.num_cols - 1 and self.walls.right:
+                yield self.maze.grid[self.row][self.col + 1]
+        return list(_generate())
+
+    def is_reachable(self, neighbor: "Cell"):
         """Function that checks if there are walls between self and a neighbour cell.
         Returns true if there are walls between. Otherwise returns False.
 
@@ -63,7 +88,7 @@ class Cell:
             True: If there are walls in between self and neighbor
             False: If there are no walls in between the neighbors and self
         """
-        return (neighbor.maze is self.maze) and neighbor in self.neighbors
+        return (neighbor.maze is self.maze) and neighbor in self.reachable_neighbors
 
     def remove_walls(self, neighbor: "Cell"):
         """Function that removes walls between neighbor cell given by indices in grid.
@@ -74,26 +99,18 @@ class Cell:
         if self.row == nr + 1 and self.col == nc and self.walls.top:
             self.walls.top = False
             neighbor.walls.bottom = False
-            self.neighbors.append(neighbor)
-            neighbor.neighbors.append(self)
             return True
         elif self.row == nr - 1 and self.col == nc and self.walls.bottom:
             self.walls.bottom = False
             neighbor.walls.top = False
-            self.neighbors.append(neighbor)
-            neighbor.neighbors.append(self)
             return True
         elif self.row == nr and self.col == nc + 1 and self.walls.left:
             self.walls.left = False
             neighbor.walls.right = False
-            self.neighbors.append(neighbor)
-            neighbor.neighbors.append(self)
             return True
         elif self.row == nr and self.col == nc - 1 and self.walls.right:
             self.walls.right = False
             neighbor.walls.left = False
-            self.neighbors.append(neighbor)
-            neighbor.neighbors.append(self)
             return True
         return False
 
@@ -165,9 +182,6 @@ class Maze:
                 cell = self.grid[i][j]
                 new_cell = new_maze.grid[i][j]
                 new_cell.walls = cell.walls.copy()
-                new_cell.neighbors = [
-                    new_maze.grid[n.row][n.col] for n in cell.neighbors
-                ]
         return new_maze
 
     def render_matplotlib(self, ax):

@@ -147,7 +147,8 @@ class Trajectory(DataPoint):
 
     @property
     def cond(self) -> CondValue | None:
-        return {"start": self.start, "end": self.end}
+        return self.start
+        # return {"start": self.start} #
 
     @property
     def sample(self) -> dict[str, torch.Tensor] | torch.Tensor:
@@ -178,7 +179,8 @@ class Trajectory(DataPoint):
     def with_values(self, sample: SampleValue, cond: CondValue | None = None) -> "Trajectory":
         assert isinstance(sample, torch.Tensor)
         start = self.start if cond is None else cond["start"] # type: ignore
-        end = self.end if cond is None else cond["end"] # type: ignore
+        # end = self.end if cond is None else cond["end"] # type: ignore
+        end = sample[:,-1] if sample.ndim == 3 else sample[-1]
         maze = self.maze if cond is None or "maze" not in cond else cond["maze"] # type: ignore
         return Trajectory(start, end, sample, maze) # type: ignore
 

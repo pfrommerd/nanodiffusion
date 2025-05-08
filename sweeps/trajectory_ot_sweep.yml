@@ -11,11 +11,10 @@ parameters:
         value: 10_000
     artifact:
         values:
-            - dpfrommer-projects/nanogen_trajectory/diffuser:v10
-            - dpfrommer-projects/nanogen_trajectory/diffuser:v11
-            - dpfrommer-projects/nanogen_trajectory/diffuser:v12
-            - dpfrommer-projects/nanogen_trajectory/diffuser:v13
-            - dpfrommer-projects/nanogen_trajectory/diffuser:v14
+            - dpfrommer-projects/nanogen_trajectory/diffuser:v15
+            - dpfrommer-projects/nanogen_trajectory/diffuser:v16
+            - dpfrommer-projects/nanogen_trajectory/diffuser:v17
+            - dpfrommer-projects/nanogen_trajectory/diffuser:v18
 command:
     - ${env}
     - ${program}

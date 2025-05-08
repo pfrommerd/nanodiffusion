@@ -28,11 +28,11 @@ def _():
 @app.cell
 def _(wandb):
     api = wandb.Api()
-    sweep = api.sweep("dpfrommer-projects/nanogen_mnist/pnrr9ybe")
+    sweep = api.sweep("dpfrommer-projects/nanogen_trajectory/jjvtd35r")
     return (sweep,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(Path, pd, sweep):
     def load_data():
         data = []
@@ -58,27 +58,22 @@ def _(np):
     from nanoconfig.data.source import DataRepository
     import nanoconfig.data.utils as data_utils
 
-    mnist_data = DataRepository.default().lookup("mnist")
-    mnist_data = mnist_data.split("test")
-    mnist_labels = np.concatenate(list(data_utils.as_numpy(batch["class"]) for batch in mnist_data.to_batches(columns=["class"])))
-    mnist_data = np.concatenate(list(data_utils.as_numpy(batch["tsne"]) for batch in mnist_data.to_batches(columns=["tsne"])))
-    return mnist_data, mnist_labels
+    traj_data = DataRepository.default().lookup("trajectory")
+    traj_data = traj_data.split("test")
+    traj_data = np.concatenate(list(data_utils.as_numpy(batch["start"])
+            for batch in traj_data.to_batches(columns=["start","end"])))
+    return (traj_data,)
 
 
 @app.cell
-def _(mnist_data, np, scipy):
+def _(np, scipy, traj_data):
     def calc_density(sample_points):
-        dists = -np.sum(np.square(sample_points[:,None, :] - mnist_data[None,:, :]), axis=-1)
-        dists = dists/50
+        dists = -np.sum(np.square(sample_points[:,None, :] - traj_data[None,:, :]), axis=-1)
+        dists = 100*dists
         log_pdfs = scipy.special.logsumexp(dists, axis=1)
         log_pdfs -= np.log(10)
         # log_pdfs = log_pdfs - scipy.special.logsumexp(log_pdfs)
         return np.exp(log_pdfs)
-
-    def calc_smoothed(cond, values):
-        dists = -np.sum(np.square(cond[:,None, :] - cond[None,:, :]), axis=-1)
-        dists = dists/20
-        return scipy.special.logsumexp(dists, axis=1, b=values)
     return (calc_density,)
 
 
@@ -87,7 +82,7 @@ def _(calc_density, data, np):
     def transform_densities(data):
         new_data = data.copy(deep=False)
         print("Calculating density...")
-        cond = np.stack((data["condition/0"], data["condition/1"]), axis=-1)
+        cond = np.stack((data["condition/start/0"], data["condition/start/1"]), axis=-1)
         new_data["density"] = calc_density(cond)
         return new_data
     transformed_data = transform_densities(data)
@@ -98,7 +93,7 @@ def _(calc_density, data, np):
 def _(calc_density, np, plt):
     def _():
         fig, ax = plt.subplots()
-        sample_points = np.random.uniform(size=(5000, 2,), low=-110, high=110)
+        sample_points = np.random.uniform(size=(5000, 2,), low=-1, high=1)
         sample_points_density = calc_density(sample_points)
         s = ax.scatter(sample_points[:,0], sample_points[:,1], c=sample_points_density)
         fig.colorbar(s)
@@ -108,7 +103,15 @@ def _(calc_density, np, plt):
 
 
 @app.cell
-def _(mnist_data, mnist_labels, np, plt, scipy, transformed_data):
+def _(data, plt):
+    plt.scatter(data["condition/start/0"], data["condition/start/1"], c=data["ddpm_ddim_dist"], s=1)
+    plt.colorbar()
+    plt.show()
+    return
+
+
+@app.cell
+def _(np, plt, scipy, transformed_data):
     def heatmaps(column_name, column_label):
         from matplotlib.colors import LogNorm
         colors = [
@@ -126,26 +129,23 @@ def _(mnist_data, mnist_labels, np, plt, scipy, transformed_data):
         fig, axs = plt.subplots(ncols=3, nrows=1, figsize=(15, 3))
         cbars = []
 
-        grid_y, grid_x = np.mgrid[-100:100:100j, -100:100:100j]
+        grid_y, grid_x = np.mgrid[-1:1:100j, -1:1:100j]
         xs, ys = grid_x[0,:], grid_y[:,0]
         for i, ((samples, sub_data), ax) in enumerate(zip(transformed_data.groupby("samples"), axs)):
             # evaluate on a grid
-            cond = np.stack((sub_data["condition/0"], sub_data["condition/1"]), axis=-1)
+            cond = np.stack((sub_data["condition/start/0"], sub_data["condition/start/1"]), axis=-1)
             values = scipy.interpolate.griddata(cond, sub_data[column_name].to_numpy(),
                                                 (grid_x, grid_y), method='cubic')[::-1,:]
-            m = ax.imshow(values,cmap="binary", extent=[-100, 100, -100, 100],
+            m = ax.imshow(values,cmap="binary", extent=[-1, 1, -1, 1],
                          vmin=1, vmax=7)
-            ax.scatter(mnist_data[::5,0], mnist_data[::5,1], c=[colors[l] for l in mnist_labels[::5]], s=1)
-            #m = ax.scatter(sub_data["condition_x"], sub_data["condition_y"], c=sub_data["ddpm_ddim_dist"],
-            #               cmap="binary", s=2)
             ax.grid(False)
             cbars.append(m)
-            ax.set_xlim([-100, 100])
-            ax.set_ylim([-100, 100])
-            ax.set_xlabel("t-SNE First Component")
-            ax.set_title(f"Conditional MNIST, N={samples}")
+            ax.set_xlim([-1, 1])
+            ax.set_ylim([-1, 1])
+            ax.set_xlabel("Start Y Location")
+            ax.set_title(f"Trajectories, N={samples}")
             if i == 0:
-                ax.set_ylabel("t-SNE Second Component")
+                ax.set_ylabel("Start Y Location")
         fig.colorbar(cbars[0], ax=axs, label=column_label)
         return fig
     _fig = heatmaps("ddpm_ddim_dist", "DDPM/DDIM OT Distance")
@@ -245,14 +245,17 @@ def _(np, pd, plt, scipy, transformed_data):
         ax_lines.set_xlabel("Conditional Log Density")
         ax_lines.set_ylabel("DDPM Schedule Inconsistency")
 
-        sub_data = transformed_data[transformed_data["samples"] == 40000]
+        sub_data = transformed_data[transformed_data["samples"] == 10_000]
 
         ax_scat.scatter(sub_data["density"], sub_data["ddpm_si/1"], alpha=0.2, s=1)
+    
         ax_scat_comp.scatter(sub_data["ddpm_si/1"], sub_data["ddpm_ddim_dist"], alpha=0.2, s=1)
+        ax_scat_comp.set_xlabel("Schedule Inconsistency")
+        ax_scat_comp.set_ylabel("DDPM/DDIM")
 
         grid_y, grid_x = np.mgrid[-100:100:100j, -100:100:100j]
         xs, ys = grid_x[0,:], grid_y[:,0]
-        cond = np.stack((sub_data["condition/0"], sub_data["condition/1"]), axis=-1)
+        cond = np.stack((sub_data["condition/start/0"], sub_data["condition/start/1"]), axis=-1)
         values = scipy.interpolate.griddata(cond, sub_data["ddpm_si/1"].to_numpy(),
                                             (grid_x, grid_y), method='cubic')[::-1,:]
         m = ax_hm.imshow(values[:,:],cmap="Blues", extent=[-100, 100, -100, 100])

@@ -28,7 +28,7 @@ def _():
 @app.cell
 def _(wandb):
     api = wandb.Api()
-    sweep = api.sweep("dpfrommer-projects/nanogen_mnist/pnrr9ybe")
+    sweep = api.sweep("dpfrommer-projects/nanogen_mnist/0t1p7ind")
     return (sweep,)
 
 
@@ -69,16 +69,11 @@ def _(np):
 def _(mnist_data, np, scipy):
     def calc_density(sample_points):
         dists = -np.sum(np.square(sample_points[:,None, :] - mnist_data[None,:, :]), axis=-1)
-        dists = dists/50
+        dists = dists/100
         log_pdfs = scipy.special.logsumexp(dists, axis=1)
-        log_pdfs -= np.log(10)
+        log_pdfs -= np.log(10000) # approximately the right normalizatin constant for the square domain
         # log_pdfs = log_pdfs - scipy.special.logsumexp(log_pdfs)
         return np.exp(log_pdfs)
-
-    def calc_smoothed(cond, values):
-        dists = -np.sum(np.square(cond[:,None, :] - cond[None,:, :]), axis=-1)
-        dists = dists/20
-        return scipy.special.logsumexp(dists, axis=1, b=values)
     return (calc_density,)
 
 
@@ -128,7 +123,8 @@ def _(mnist_data, mnist_labels, np, plt, scipy, transformed_data):
 
         grid_y, grid_x = np.mgrid[-100:100:100j, -100:100:100j]
         xs, ys = grid_x[0,:], grid_y[:,0]
-        for i, ((samples, sub_data), ax) in enumerate(zip(transformed_data.groupby("samples"), axs)):
+        groups = [(s, d) for s, d in transformed_data.groupby("samples") if s in [10_000, 30_000, 60_000]]
+        for i, ((samples, sub_data), ax) in enumerate(zip(groups, axs)):
             # evaluate on a grid
             cond = np.stack((sub_data["condition/0"], sub_data["condition/1"]), axis=-1)
             values = scipy.interpolate.griddata(cond, sub_data[column_name].to_numpy(),
@@ -156,7 +152,7 @@ def _(mnist_data, mnist_labels, np, plt, scipy, transformed_data):
 
 @app.cell
 def _(heatmaps):
-    _fig = heatmaps("ddim_accel_dist", "DDIM/GE OT Distance")
+    _fig = heatmaps("ddim_accel_dist", "DDIM/GE Transport")
     _fig.savefig("figures/ddim_idop_dist.pdf", bbox_inches="tight")
     _fig
     return
@@ -182,10 +178,8 @@ def _(calc_density, np, pd, plt, transformed_data):
     def _():
         fig, (ax, ax_density) = plt.subplots(nrows=1, ncols=2, figsize=(15, 3.5))
         for samples, samples_data in transformed_data.groupby("samples"):
-            if samples > 50_000:
-                continue
             samples_data = samples_data.copy(deep=False)
-            samples_data = samples_data[samples_data["density"] > 0.1]
+            samples_data = samples_data[samples_data["density"] > 0.0001]
             density = samples_data["density"].to_numpy()
             labels, bins = pd.cut(density, 12, retbins=True)
             bins = (bins[:-1] + bins[1:])/2
@@ -205,7 +199,7 @@ def _(calc_density, np, pd, plt, transformed_data):
         xs, ys = grid_x[0,:], grid_y[:,0]
         density = calc_density(np.stack((grid_x.reshape(-1), grid_y.reshape(-1)), -1))
         density = density.reshape(grid_x.shape)/bin_values.max()
-    
+
         m = ax_density.imshow(density[::-1,:],cmap="Blues", extent=[-100, 100, -100, 100])
         ax_density.grid(False)
         ax_density.set_ylabel("t-SNE Second Component")
@@ -226,8 +220,8 @@ def _(np, pd, plt, scipy, transformed_data):
         main_col = cols[1]
         for samples, samples_data in transformed_data.groupby("samples"):
             samples_data = samples_data.copy(deep=False)
-        
-            samples_data = samples_data[samples_data["density"] > 0.1]
+
+            samples_data = samples_data[samples_data["density"] > 0.0001]
             density = np.log(samples_data["density"].to_numpy())
             labels, bins = pd.cut(density, 10, retbins=True)
             bins = (bins[:-1] + bins[1:])/2
@@ -240,20 +234,24 @@ def _(np, pd, plt, scipy, transformed_data):
 
             ax_lines.plot(bin_values, data.si, label=f"N={samples}")
             ax_lines.fill_between(bin_values, data_lower.si, data_upper.si, alpha=0.2)
+
+            ax_scat.scatter(samples_data["density"], samples_data["ddpm_si/1"], alpha=0.2, s=1)
+            ax_scat_comp.scatter(samples_data["ddpm_si/3"], samples_data["ddpm_ddim_dist"], alpha=0.2, s=1, label=f"N={samples}")
+
         ax_lines.legend(loc="upper right")
         #ax1.set_xlim([-1, 2.3])
         ax_lines.set_xlabel("Conditional Log Density")
         ax_lines.set_ylabel("DDPM Schedule Inconsistency")
 
-        sub_data = transformed_data[transformed_data["samples"] == 40000]
+        ax_scat_comp.legend(loc="upper right")
 
-        ax_scat.scatter(sub_data["density"], sub_data["ddpm_si/1"], alpha=0.2, s=1)
-        ax_scat_comp.scatter(sub_data["ddpm_si/1"], sub_data["ddpm_ddim_dist"], alpha=0.2, s=1)
+        sub_data = transformed_data[transformed_data["samples"] == 20000]
+
     
         grid_y, grid_x = np.mgrid[-100:100:100j, -100:100:100j]
         xs, ys = grid_x[0,:], grid_y[:,0]
         cond = np.stack((sub_data["condition/0"], sub_data["condition/1"]), axis=-1)
-        values = scipy.interpolate.griddata(cond, sub_data["ddpm_si/1"].to_numpy(),
+        values = scipy.interpolate.griddata(cond, sub_data["ddpm_si/2"].to_numpy(),
                                             (grid_x, grid_y), method='cubic')[::-1,:]
         m = ax_hm.imshow(values[:,:],cmap="Blues", extent=[-100, 100, -100, 100])
         ax_hm.grid(False)

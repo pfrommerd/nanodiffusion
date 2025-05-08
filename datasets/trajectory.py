@@ -83,6 +83,11 @@ schema = pa.schema([
 def generate_maze(rng):
     maze = Maze(MAZE_SIZE, MAZE_SIZE)
     maze = maze_generator.generate(rng, maze)
+    # pick four random walls to knock down in the mizzle
+    cells = maze.cells
+    for i in rng.integers(0, len(cells), size=(3,)):
+        nr = rng.integers(0, len(cells[i].unreachable_neighbors))
+        cells[i].remove_walls(cells[i].unreachable_neighbors[nr])
     return maze
 
 def get_bezier_parameters(X, Y, degree=3):
@@ -126,10 +131,12 @@ def lin_interpolate(trajectory):
     return trajectory
 
 def generate_trajectory(rng: Rng, maze: Maze, trajectory_length: int) -> np.ndarray:
-    reachable_cells = maze.cells
-    start_idx, end_idx = rng.choice(len(reachable_cells), 2, replace=False)
-    start, end = reachable_cells[start_idx], reachable_cells[end_idx]
-    path = maze_solver.solve(rng, maze, start, end)
+    path = []
+    while len(path) < 8 or len(path) > 16:
+        reachable_cells = maze.cells
+        start_idx, end_idx = rng.choice(len(reachable_cells), 2, replace=False)
+        start, end = reachable_cells[start_idx], reachable_cells[end_idx]
+        path = maze_solver.solve(rng, maze, start, end)
     trajectory = np.array([(c.col + 0.5, c.row + 0.5) for c in path], dtype=np.float32)
     trajectory += rng.normal(0, 0.2, trajectory.shape).astype(np.float32).clip(-0.3, 0.3)
     trajectory = lin_interpolate(lin_interpolate(trajectory))

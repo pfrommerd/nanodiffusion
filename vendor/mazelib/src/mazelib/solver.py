@@ -30,7 +30,7 @@ class DjikstraSolver(Solver):
 
         best_distances[start] = 0
         queue : list[QueueItem] = [
-            QueueItem(1, start, n) for n in start.neighbors
+            QueueItem(1, start, n) for n in start.reachable_neighbors
         ]
         heapq.heapify(queue)
 
@@ -42,7 +42,7 @@ class DjikstraSolver(Solver):
                 continue
             best_distances[best.cell] = best.distance
             best_from[best.cell] = best.parent
-            for n in best.cell.neighbors:
+            for n in best.cell.reachable_neighbors:
                 if n in best_distances:
                     continue
                 heapq.heappush(queue,

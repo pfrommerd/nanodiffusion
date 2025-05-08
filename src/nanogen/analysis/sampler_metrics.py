@@ -35,7 +35,7 @@ def sum_except_dim(x, dim):
     dims.remove(dim)
     return torch.sum(x, dim=dims, keepdim=True)
 
-def divergence(y, x):
+def divergence(y, x) -> torch.Tensor:
     div = 0.
     # do a "randomized" divergence
     if y.shape[-1] > 32:
