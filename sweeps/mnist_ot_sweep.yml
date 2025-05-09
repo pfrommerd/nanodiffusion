@@ -1,6 +1,6 @@
 program: metrics
 project: nanogen_mnist
-name: sampler_data_sweep
+name: mnist_metrics
 method: grid
 parameters:
     wandb:

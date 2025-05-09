@@ -12,14 +12,18 @@ parameters:
     limit_data:
         values: [10_000, 20_000, 30_000, 40_000, 50_000, 60_000]
     batch_size:
-        value: 128
+        value: 256
     gen_batch_size:
         value: 64
     model.diffusion.sample_timesteps:
         value: 16
+    model.diffusion.nn.unet.base_channels:
+        value: 128
+    model.diffusion.nn.unet.num_groups:
+        value: 32
     iterations:
         # value: 150 # for smoke testing
-        value: 200_000
+        value: 300_000
     optimizer.lr:
         value: 0.0003
     data:
