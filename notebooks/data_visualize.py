@@ -1,25 +1,25 @@
+
+
 import marimo
 
-__generated_with = "0.12.10"
+__generated_with = "0.13.2"
 app = marimo.App(width="medium")
 
 
 @app.cell
 def _():
-    import nanogen
-    from nanogen import TrainConfig, DiffuserConfig, ExperimentConfig
-    from torch.utils.data import DataLoader
-    import logging
-    import marimo as mo
-    return (
-        DataLoader,
-        DiffuserConfig,
-        ExperimentConfig,
-        TrainConfig,
-        logging,
-        mo,
-        nanogen,
-    )
+    from nanoconfig.data.source import DataRepository
+    from nanogen.data import register_types
+    from nanoconfig.data.torch import TorchAdapter
+
+
+    adapter = TorchAdapter()
+    register_types(adapter)
+
+    traj_data = DataRepository.default().lookup("trajectory")
+    traj_data = traj_data.split("test", adapter)
+    traj_data.head(128).to_result()
+    return
 
 
 @app.cell
@@ -69,7 +69,7 @@ def _(
     _, test_data = config.diffuser.data.create()
     test_samples = next(iter(DataLoader(test_data, batch_size=5)))
     test_data.visualize_batch(test_samples)
-    return config, test_data, test_samples
+    return (config,)
 
 
 @app.cell
@@ -78,7 +78,7 @@ def _(config, logger, nanogen):
     model = config.run(logger)
     samples = model.sample(16, seed=1)
     model.test_data.visualize_batch(samples)
-    return model, samples
+    return
 
 
 @app.cell

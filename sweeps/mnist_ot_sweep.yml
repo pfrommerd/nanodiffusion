@@ -6,7 +6,7 @@ parameters:
     wandb:
         value: true
     batch_size:
-        value: 128
+        value: 256
     num_samples:
         value: 10_000
     artifact:

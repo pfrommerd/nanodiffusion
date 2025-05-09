@@ -1,5 +1,6 @@
 import torch
 import math
+import functools
 import typing as ty
 
 from einops import rearrange
@@ -12,8 +13,8 @@ from smalldiffusion.model import (
 from nanoconfig import config
 from . import CondEmbedder, DiffuserConfig, ModelConfig, Diffuser, SampleValue, CondValue
 
-def Normalize(ch):
-    return torch.nn.GroupNorm(num_groups=32, num_channels=ch, eps=1e-6, affine=True)
+def GroupNormalize(ch, num_groups):
+    return torch.nn.GroupNorm(num_groups=num_groups, num_channels=ch, eps=1e-6, affine=True)
 
 class Upsample(nn.Module):
     def __init__(self, channels, Conv):
@@ -43,7 +44,7 @@ class Downsample(nn.Module):
 
 class ResnetBlock(nn.Module):
     def __init__(self, *, in_ch, out_ch=None, conv_shortcut=False,
-                 dropout, temb_channels=512, Conv):
+                 dropout, temb_channels=512, Conv, Normalize):
         super().__init__()
         self.in_ch = in_ch
         out_ch = in_ch if out_ch is None else out_ch
@@ -82,7 +83,7 @@ class ResnetBlock(nn.Module):
         return x + h
 
 class AttnBlock(nn.Module):
-    def __init__(self, ch, *, num_heads=1, Conv):
+    def __init__(self, ch, *, num_heads=1, Conv, Normalize):
         super().__init__()
         # Normalize input along the channel dimension
         self.norm = Normalize(ch)
@@ -110,6 +111,7 @@ class Unet(Diffuser):
                  num_res_blocks   = 2,
                  attn_resolutions = (16,),
                  dropout          = 0.1,
+                 num_groups       = 32,
                  resample_with_conv = True,
                  sig_embed        = None,
                  cond_embed       = None,
@@ -130,11 +132,12 @@ class Unet(Diffuser):
             Conv = nn.Conv3d
         else:
             raise ValueError(f"Unsupported spatial dimensions: {spatial_dims}")
-
+        Normalize = functools.partial(GroupNormalize, num_groups=num_groups)
         # Embeddings
         self.sig_embed = sig_embed or SigmaEmbedderSinCos(self.temb_ch)
         make_block = lambda in_ch, out_ch: ResnetBlock(
-            in_ch=in_ch, out_ch=out_ch, temb_channels=self.temb_ch, dropout=dropout, Conv=Conv
+            in_ch=in_ch, out_ch=out_ch, temb_channels=self.temb_ch, dropout=dropout,
+            Conv=Conv, Normalize=Normalize
         )
         self.cond_embed = cond_embed
 
@@ -153,7 +156,7 @@ class Unet(Diffuser):
                 down.blocks.append(make_block(block_in, block_out))
                 block_in = block_out
                 if red_factor in attn_resolutions:
-                    down.blocks.append(AttnBlock(block_in, Conv=Conv))
+                    down.blocks.append(AttnBlock(block_in, Conv=Conv, Normalize=Normalize))
             if i < self.num_resolutions - 1: # Not last iter
                 down.blocks.append(Downsample(block_in, spatial_dims, Conv=Conv))
                 skip_channels.append(block_in)
@@ -162,7 +165,7 @@ class Unet(Diffuser):
         # Middle
         self.mid = CondSequential(
             make_block(block_in, block_in),
-            AttnBlock(block_in, Conv=Conv),
+            AttnBlock(block_in, Conv=Conv, Normalize=Normalize),
             make_block(block_in, block_in)
         )
         # Upsampling
@@ -177,16 +180,16 @@ class Unet(Diffuser):
                 skip_ch = 0
                 block_in = block_out
                 if red_factor in attn_resolutions:
-                    up.blocks.append(AttnBlock(block_in, Conv=Conv)) # type: ignore
+                    up.blocks.append(AttnBlock(block_in, Conv=Conv, Normalize=Normalize))
             if i_level < self.num_resolutions - 1: # Not last iter
-                up.blocks.append(Upsample(block_in, Conv=Conv)) # type: ignore
+                up.blocks.append(Upsample(block_in, Conv=Conv))
                 red_factor = red_factor // 2
             self.ups.append(up)
         # Out
         self.out_layer = nn.Sequential(
             Normalize(block_in), # type: ignore
             nn.SiLU(),
-            Conv(block_in, out_ch, kernel_size=3, stride=1, padding=1), # type: ignore
+            Conv(block_in, out_ch, kernel_size=3, stride=1, padding=1),
         )
 
     def forward(self, x, sigma, cond=None):
@@ -234,6 +237,7 @@ class UnetConfig(DiffuserConfig):
     attn_resolutions: ty.Sequence[int] = (4,)
     dropout: float = 0.1
     resample_with_conv: bool = True
+    num_groups: int = 32
 
     def create(self, sample_structure: SampleValue, cond_structure: CondValue) -> Unet:
         assert isinstance(sample_structure, torch.Tensor), "Can only use Unet for single tensor samples."
@@ -249,6 +253,7 @@ class UnetConfig(DiffuserConfig):
             attn_resolutions=self.attn_resolutions,
             dropout=self.dropout,
             resample_with_conv=self.resample_with_conv,
+            num_groups=self.num_groups,
             sig_embed=SigmaEmbedderSinCos(embed_features),
             cond_embed=CondEmbedder(cond_structure, embed_features)
         )

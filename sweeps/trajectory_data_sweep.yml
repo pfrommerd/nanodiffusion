@@ -17,6 +17,10 @@ parameters:
         value: 64
     model.diffusion.sample_timesteps:
         value: 16
+    model.diffusion.nn.unet.base_channels:
+        value: 32
+    model.diffusion.nn.unet.num_groups:
+        value: 16
     iterations:
         # value: 150 # for smoke testing
         value: 30_000
