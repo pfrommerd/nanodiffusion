@@ -8,13 +8,14 @@ parameters:
     batch_size:
         value: 128
     num_samples:
-        value: 10_000
+        value: 5_000
     artifact:
         values:
-            - dpfrommer-projects/nanogen_trajectory/diffuser:v15
-            - dpfrommer-projects/nanogen_trajectory/diffuser:v16
-            - dpfrommer-projects/nanogen_trajectory/diffuser:v17
-            - dpfrommer-projects/nanogen_trajectory/diffuser:v18
+            - dpfrommer-projects/nanogen_trajectory/diffuser:v24
+            - dpfrommer-projects/nanogen_trajectory/diffuser:v23
+            - dpfrommer-projects/nanogen_trajectory/diffuser:v26
+            - dpfrommer-projects/nanogen_trajectory/diffuser:v28
+            - dpfrommer-projects/nanogen_trajectory/diffuser:v29
 command:
     - ${env}
     - ${program}

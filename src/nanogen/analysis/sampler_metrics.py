@@ -35,50 +35,52 @@ def sum_except_dim(x, dim):
     dims.remove(dim)
     return torch.sum(x, dim=dims, keepdim=True)
 
-def divergence(y, x) -> torch.Tensor:
-    div : torch.Tensor = 0. # type: ignore
-    # do a "randomized" divergence
-    if y.shape[-1] > 16:
-        for i in torch.randint(low=0,high=y.shape[-1], size=(16,)):
-            div += torch.autograd.grad(y[..., i], x,
-                torch.ones_like(y[..., i]), retain_graph=True)[0][..., i]
-    else:
-        for i in range(y.shape[-1]):
-            div += torch.autograd.grad(y[..., i], x,
-                torch.ones_like(y[..., i]), retain_graph=True)[0][..., i]
-    return div
+def divergence_diff(a, b, x) -> torch.Tensor:
+    assert a.shape == b.shape
+    assert a.ndim == 2
+    # do a "randomized" divergence by picking a random coordinate
+    # per element in the batch
+    i = torch.randint(0, a.shape[1], (a.shape[0],), device=a.device)
+    a_elems = torch.gather(a, dim=1, index=i.unsqueeze(1))
+    b_elems = torch.gather(b, dim=1, index=i.unsqueeze(1))
+    all_par_a = torch.autograd.grad(a_elems, x, torch.ones_like(a_elems), retain_graph=True)[0]
+    all_par_b = torch.autograd.grad(b_elems, x, torch.ones_like(b_elems), retain_graph=True)[0]
+    div_a = torch.gather(all_par_a, dim=1, index=i.unsqueeze(1))
+    div_b = torch.gather(all_par_b, dim=1, index=i.unsqueeze(1))
+    return div_a - div_b
 
 def measure_si(model, final_samples, sigma) -> torch.Tensor:
     inter_samples = model.generate_forward(final_samples, sigma)
 
-    # orig_shape = inter_samples.shape
-    # inter_samples_flat = inter_samples.reshape(inter_samples.shape[0], -1)
-    # inter_samples_flat = inter_samples_flat.detach().requires_grad_()
-    # pred = model.diffuser(inter_samples_flat.reshape(*orig_shape), sigma)
-    # pred = pred.reshape(inter_samples.shape[0], -1)
-    # div = divergence(pred, inter_samples_flat).detach()
-    # pred = pred.reshape(*orig_shape).detach()
+    orig_shape = inter_samples.shape
+    inter_samples_flat = inter_samples.reshape(inter_samples.shape[0], -1)
+    inter_samples_flat = inter_samples_flat.detach().requires_grad_()
+    pred = model.diffuser(inter_samples_flat.reshape(*orig_shape), sigma)
+    pred = pred.reshape(inter_samples.shape[0], -1)
 
-    with torch.no_grad():
-        pred = model.diffuser(inter_samples, sigma)
-        x_flat = inter_samples.flatten(start_dim=1)
-        d_flat = final_samples.flatten(start_dim=1) # type: ignore
-        (xb, xr), (db, dr) = x_flat.shape, d_flat.shape
-        sq_diffs = sq_norm(x_flat, db).T + sq_norm(d_flat, xb) - 2 * d_flat @ x_flat.T # shape: db x xb
-        log_weights = -sq_diffs/2/sigma.squeeze()**2
-        weights = torch.nn.functional.softmax(log_weights, dim=0)
-        x0 = torch.einsum('ij,i...->j...', weights, final_samples)
-        true_exp = (inter_samples - x0) / sigma
-        # The "true" schedule inconsistency is this
+    x_flat = inter_samples_flat
+    d_flat = final_samples.flatten(start_dim=1) # type: ignore
+    (xb, xr), (db, dr) = x_flat.shape, d_flat.shape
+    sq_diffs = sq_norm(x_flat, db).T + sq_norm(d_flat, xb) - 2 * d_flat @ x_flat.T # shape: db x xb
+    log_weights = -sq_diffs/2/sigma.squeeze()**2
+    weights = torch.nn.functional.softmax(log_weights, dim=0)
+    x0_flat = torch.einsum('ij,i...->j...', weights, d_flat)
+    true_exp = (x_flat - x0_flat) / sigma
+
+    div = divergence_diff(pred, true_exp, inter_samples_flat).detach()
+    pred = pred.reshape(*orig_shape).detach()
+    true_exp = true_exp.reshape(*orig_shape).detach()
+
+    # The "true" schedule inconsistency is this
     # scales by dot sigma / sigma * p(x_t)
     # we use this to make everything noise-scale-invariant
     # (note the div scales with sigma^(-1), so
     # multiplying that by sigma should be fine)
-    # div_comp = sigma * div
+
+    div_comp = sigma * div
     dot_comp = torch.sum(true_exp.reshape(true_exp.shape[0], -1) *
             (pred - true_exp).reshape(pred.shape[0], -1), dim=1)
-    # si = div_comp + dot_comp
-    si = dot_comp
+    si = div_comp + dot_comp
     # print(div_comp, dot_comp, si, si.abs().mean())
     si = si.abs().mean()
     # si = si.abs().sqrt().mean().square()

@@ -28,16 +28,16 @@ def _():
 @app.cell
 def _(wandb):
     api = wandb.Api()
-    return
+    return (api,)
 
 
 @app.cell
-def _(Path, pd, wandb):
-    #sweep = api.sweep("dpfrommer-projects/nanogen_trajectory/jjvtd35r")
-    #artifacts = list(list(a for a in run.logged_artifacts() if a.type == "results")[0]
-    #                for run in sweep.runs if list(a for a in run.logged_artifacts() if a.type == "results"))
-    run = wandb.init()
-    artifacts = [run.use_artifact("dpfrommer-projects/nanogen-.venv_bin/results:v3")]
+def _(Path, api, pd):
+    sweep = api.sweep("dpfrommer-projects/nanogen_trajectory/cdlg8gkw")
+    artifacts = list(list(a for a in run.logged_artifacts() if a.type == "results")[0]
+                   for run in sweep.runs if list(a for a in run.logged_artifacts() if a.type == "results"))
+    # run = wandb.init()
+    # artifacts = [run.use_artifact("dpfrommer-projects/nanogen-.venv_bin/results:v3")]
     def load_data(artifacts):
         data = []
         for artifact in artifacts:
@@ -105,7 +105,7 @@ def _(calc_density, np, plt):
 
 @app.cell
 def _(data, plt):
-    plt.scatter(data["condition/0"], data["condition/1"], c=data["ddpm_ddim_dist"], s=1)
+    plt.scatter(data["condition/0"], data["condition/1"], c=data["ddpm_ddim_dist"], s=4)
     plt.colorbar()
     plt.show()
     return
@@ -124,9 +124,8 @@ def _(np, plt, scipy, transformed_data):
             # evaluate on a grid
             cond = np.stack((sub_data["condition/0"], sub_data["condition/1"]), axis=-1)
             values = scipy.interpolate.griddata(cond, sub_data[column_name].to_numpy(),
-                                                (grid_x, grid_y), method='cubic')[::-1,:]
-            m = ax.imshow(values,cmap="binary", extent=[-1, 1, -1, 1],
-                         vmin=1, vmax=7)
+                                                (grid_x, grid_y), method='nearest')[::-1,:]
+            m = ax.imshow(values,cmap="binary", extent=[-1, 1, -1, 1])
             ax.grid(False)
             cbars.append(m)
             ax.set_xlim([-1, 1])
@@ -233,18 +232,16 @@ def _(np, pd, plt, scipy, transformed_data):
         #ax1.set_xlim([-1, 2.3])
         ax_lines.set_xlabel("Conditional Log Density")
         ax_lines.set_ylabel("DDPM Schedule Inconsistency")
-
-        sub_data = transformed_data[transformed_data["samples"] == 10_000]
-
+        sub_data = transformed_data[transformed_data["samples"] == 8000]
         ax_scat.scatter(sub_data["density"], sub_data["ddpm_si/1"], alpha=0.2, s=1)
-    
+
         ax_scat_comp.scatter(sub_data["ddpm_si/1"], sub_data["ddpm_ddim_dist"], alpha=0.2, s=1)
         ax_scat_comp.set_xlabel("Schedule Inconsistency")
         ax_scat_comp.set_ylabel("DDPM/DDIM")
 
         grid_y, grid_x = np.mgrid[-100:100:100j, -100:100:100j]
         xs, ys = grid_x[0,:], grid_y[:,0]
-        cond = np.stack((sub_data["condition/start/0"], sub_data["condition/start/1"]), axis=-1)
+        cond = np.stack((sub_data["condition/0"], sub_data["condition/1"]), axis=-1)
         values = scipy.interpolate.griddata(cond, sub_data["ddpm_si/1"].to_numpy(),
                                             (grid_x, grid_y), method='cubic')[::-1,:]
         m = ax_hm.imshow(values[:,:],cmap="Blues", extent=[-100, 100, -100, 100])
