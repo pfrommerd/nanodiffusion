@@ -90,7 +90,7 @@ def measure_si_traj(model, cond, final_samples, sigmas):
     # return torch.zeros(len(inter_samples), device=final_samples.device)
     return torch.stack([
         measure_si(model, cond, final_samples, sigma)
-        for sigma in sigmas[::4]
+        for sigma in sigmas
     ], dim=0)
 
 def data_generator(pipeline, accelerator, samples_per_cond):
@@ -124,17 +124,17 @@ def data_generator(pipeline, accelerator, samples_per_cond):
         )
         ddpm_samples = list(model.generate(sample_structure,
                     cond=cond_ex, gamma=1.0, mu=0.5))
-        ddpm_si = measure_si_traj(model, cond_ex, ddpm_samples[-1], model.gen_sigmas)
+        ddpm_si = measure_si_traj(model, cond_ex, ddpm_samples[-1], model.gen_sigmas[::4])
         ddpm_samples = ddpm_samples[-1]
 
         ddim_samples = list(model.generate(sample_structure,
                     cond=cond_ex, gamma=1.0, mu=0.))
-        ddim_si = measure_si_traj(model, cond_ex, ddim_samples[-1], model.gen_sigmas)
+        ddim_si = measure_si_traj(model, cond_ex, ddim_samples[-1], model.gen_sigmas[::4])
         ddim_samples = ddim_samples[-1]
 
         accel_samples = list(model.generate(sample_structure,
                     cond=cond_ex, gamma=2.0, mu=0.))
-        accel_si = measure_si_traj(model, cond_ex, accel_samples[-1], model.gen_sigmas)
+        accel_si = measure_si_traj(model, cond_ex, accel_samples[-1], model.gen_sigmas[::4])
         accel_samples = accel_samples[-1]
         yield (cond, (ddpm_samples, ddpm_si),
             (ddim_samples, ddim_si), (accel_samples, accel_si)

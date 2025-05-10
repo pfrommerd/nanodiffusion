@@ -28,7 +28,7 @@ def _():
 @app.cell
 def _(wandb):
     api = wandb.Api()
-    sweep = api.sweep("dpfrommer-projects/nanogen_mnist/xfcvx8ov")
+    sweep = api.sweep("dpfrommer-projects/nanogen_mnist/nqlofeyh")
     return (sweep,)
 
 
@@ -104,7 +104,7 @@ def _(calc_density, np, plt):
 
 @app.cell
 def _(mnist_data, mnist_labels, np, plt, scipy, transformed_data):
-    def heatmaps(column_name, column_label):
+    def heatmaps(first_row_col, first_row_label, second_row_col, second_row_label):
         from matplotlib.colors import LogNorm
         colors = [
             "#4c72b0",  # blue
@@ -118,52 +118,56 @@ def _(mnist_data, mnist_labels, np, plt, scipy, transformed_data):
             "#ccb974",  # khaki
             "#64b5cd",  # cyan
         ]
-        fig, axs = plt.subplots(ncols=3, nrows=1, figsize=(15, 3))
-        cbars = []
+        fig, axs = plt.subplots(ncols=3, nrows=2, figsize=(15, 10))
+        first_cbars = []
+        second_cbars = []
 
         grid_y, grid_x = np.mgrid[-100:100:100j, -100:100:100j]
         xs, ys = grid_x[0,:], grid_y[:,0]
-        groups = [(s, d) for s, d in transformed_data.groupby("samples") if s in [10_000, 30_000, 60_000]]
-        for i, ((samples, sub_data), ax) in enumerate(zip(groups, axs)):
+        groups = [(s, d) for s, d in transformed_data.groupby("samples") if s in [10_000, 20_000, 30_000]]
+        for i, ((samples, sub_data), col_axs) in enumerate(zip(groups, axs.T)):
             # evaluate on a grid
             cond = np.stack((sub_data["condition/0"], sub_data["condition/1"]), axis=-1)
-            values = scipy.interpolate.griddata(cond, sub_data[column_name].to_numpy(),
-                                                (grid_x, grid_y), method='cubic')[::-1,:]
-            m = ax.imshow(values,cmap="binary", extent=[-100, 100, -100, 100],
-                         vmin=1, vmax=7)
-            ax.scatter(mnist_data[::5,0], mnist_data[::5,1], c=[colors[l] for l in mnist_labels[::5]], s=1)
-            #m = ax.scatter(sub_data["condition_x"], sub_data["condition_y"], c=sub_data["ddpm_ddim_dist"],
-            #               cmap="binary", s=2)
-            ax.grid(False)
-            cbars.append(m)
-            ax.set_xlim([-100, 100])
-            ax.set_ylim([-100, 100])
-            ax.set_xlabel("t-SNE First Component")
-            ax.set_title(f"Conditional MNIST, N={samples}")
+            first_row_values = scipy.interpolate.griddata(cond, sub_data[first_row_col].to_numpy(),
+                                                (grid_x, grid_y), method='linear')[::-1,:]
+            second_row_values = scipy.interpolate.griddata(cond, sub_data[second_row_col].to_numpy(),
+                                                (grid_x, grid_y), method='linear')[::-1,:]
+            first_ax, second_ax = col_axs
+            first_cbar = first_ax.imshow(first_row_values,cmap="binary", extent=[-100, 100, -100, 100])
+            second_cbar = second_ax.imshow(second_row_values,cmap="binary", extent=[-100, 100, -100, 100])
+        
+            first_ax.scatter(mnist_data[::10,0], mnist_data[::10,1], c=[colors[l] for l in mnist_labels[::10]], s=2, alpha=0.8)
+            second_ax.scatter(mnist_data[::10,0], mnist_data[::10,1], c=[colors[l] for l in mnist_labels[::10]], s=2, alpha=0.8)
+
+            first_ax.grid(False)
+            second_ax.grid(False)
+            first_cbars.append(first_cbar)
+            second_cbars.append(first_cbar)
+            first_ax.set_xlim([-100, 100])
+            first_ax.set_ylim([-100, 100])
+            second_ax.set_xlim([-100, 100])
+            second_ax.set_ylim([-100, 100])
+            first_ax.set_title(f"Conditional MNIST, N={samples}")
             if i == 0:
-                ax.set_ylabel("t-SNE Second Component")
-        fig.colorbar(cbars[0], ax=axs, label=column_label)
+                first_ax.set_ylabel("t-SNE Second Component")
+                second_ax.set_ylabel("t-SNE Second Component")
+            second_ax.set_xlabel("t-SNE First Component")
+        fig.colorbar(first_cbars[0], ax=axs[0], label=first_row_label)
+        fig.colorbar(second_cbars[0], ax=axs[1], label=second_row_label)
         return fig
-    _fig = heatmaps("ddpm_ddim_dist", "DDPM/DDIM OT Distance")
+
+    _fig = heatmaps("ddpm_ddim_dist", "DDPM/DDIM OT Distance", "ddpm_si/2", "DDPM Schedule Deviation")
     _fig.savefig("figures/ddpm_ddim_dist.pdf", bbox_inches="tight")
     _fig
-    return (heatmaps,)
-
-
-@app.cell
-def _(heatmaps):
-    _fig = heatmaps("ddim_accel_dist", "DDIM/GE Transport")
-    _fig.savefig("figures/ddim_idop_dist.pdf", bbox_inches="tight")
-    _fig
     return
 
 
-@app.cell
-def _(heatmaps):
-    _fig = heatmaps("ddpm_accel_dist", "DDPM/GE OT Distance")
-    _fig.savefig("figures/ddpm_idop_dist.pdf", bbox_inches="tight")
-    _fig
-    return
+app._unparsable_cell(
+    r"""
+    for c in 
+    """,
+    name="_"
+)
 
 
 @app.cell
@@ -221,60 +225,74 @@ def _(plt, transformed_data):
     return
 
 
-app._unparsable_cell(
-    r"""
-    tdef _():
+@app.cell
+def _(np, pd, plt, scipy, transformed_data):
+    def _():
         fig, ((ax_lines, ax_hm), (ax_scat, ax_scat_comp)) = plt.subplots(nrows=2, ncols=2, figsize=(15, 10))
-        cols = [f\"ddpm_si/{i}\" for i in range(5)]
-        main_col = cols[1]
-        for samples, samples_data in transformed_data.groupby(\"samples\"):
+        cols = [f"ddpm_si/{i}" for i in range(5)]
+        main_col = "ddpm_si/2"
+        for samples, samples_data in transformed_data.groupby("samples"):
             samples_data = samples_data.copy(deep=False)
 
-            samples_data = samples_data[samples_data[\"density\"] > 0.01]
-            density = np.log(samples_data[\"density\"].to_numpy())
+            samples_data = samples_data[samples_data["density"] > 0.01]
+            density = np.log(samples_data["density"].to_numpy())
             labels, bins = pd.cut(density, 10, retbins=True)
             bins = (bins[:-1] + bins[1:])/2
-            samples_data[\"bins\"] = labels
-            samples_data[\"si\"] = samples_data[main_col] #samples_data[cols].mean(axis=1)
-            data = samples_data.groupby(\"bins\", observed=True).median().reset_index()
-            data_upper = samples_data.groupby(\"bins\", observed=True).quantile(0.75).reset_index()
-            data_lower = samples_data.groupby(\"bins\", observed=True).quantile(0.25).reset_index()
+            samples_data["bins"] = labels
+            samples_data["si"] = samples_data[main_col] #samples_data[cols].mean(axis=1)
+            data = samples_data.groupby("bins", observed=True).median().reset_index()
+            data_upper = samples_data.groupby("bins", observed=True).quantile(0.75).reset_index()
+            data_lower = samples_data.groupby("bins", observed=True).quantile(0.25).reset_index()
             bin_values = data.bins.apply(lambda x: (x.left + x.right)/2).to_numpy()
 
-            ax_lines.plot(bin_values, data.si, label=f\"N={samples}\")
+            ax_lines.plot(bin_values, data.si, label=f"N={samples}")
             ax_lines.fill_between(bin_values, data_lower.si, data_upper.si, alpha=0.2)
 
-            ax_scat.scatter(samples_data[\"density\"], samples_data[\"ddpm_si/1\"], alpha=0.2, s=1)
-            ax_scat_comp.scatter(samples_data[\"ddpm_si/3\"], samples_data[\"ddpm_ddim_dist\"], alpha=0.2, s=1, label=f\"N={samples}\")
+            ax_scat.scatter(samples_data["density"], samples_data[main_col], alpha=0.2, s=3)
+            ax_scat_comp.scatter(samples_data[main_col], samples_data["ddpm_ddim_dist"], alpha=0.2, s=3,
+                                 label=f"N={samples}")
 
-        ax_lines.legend(loc=\"upper right\")
+        ax_lines.legend(loc="upper right")
         #ax1.set_xlim([-1, 2.3])
-        ax_lines.set_xlabel(\"Conditional Log Density\")
-        ax_lines.set_ylabel(\"DDPM Schedule Inconsistency\")
+        ax_lines.set_xlabel("Conditional Log Density")
+        ax_lines.set_ylabel("DDPM Schedule Inconsistency")
 
-        ax_scat_comp.legend(loc=\"upper right\")
+        ax_scat_comp.legend(loc="upper right")
 
-        sub_data = transformed_data[(transformed_data[\"samples\"] == 30000)]
+        sub_data = transformed_data[(transformed_data["samples"] == 20000)]
 
-        total_si = sub_data[\"ddpm_si/1\"] + sub_data[\"ddpm_si/2\"] + sub_data[\"ddpm_si/3\"] +sub_data[\"ddpm_si/4\"]
-
+        #total_si = sub_data["ddpm_si/1"] + sub_data["ddpm_si/2"] + sub_data["ddpm_si/3"] +sub_data["ddpm_si/4"]
+        total_si = sub_data["ddpm_si/3"]
         grid_y, grid_x = np.mgrid[-100:100:100j, -100:100:100j]
         xs, ys = grid_x[0,:], grid_y[:,0]
-        cond = np.stack((sub_data[\"condition/0\"], sub_data[\"condition/1\"]), axis=-1)
+        cond = np.stack((sub_data["condition/0"], sub_data["condition/1"]), axis=-1)
         values = scipy.interpolate.griddata(cond, total_si.to_numpy(),
                                             (grid_x, grid_y), method='nearest')[::-1,:]
-        m = ax_hm.imshow(values[:,:],cmap=\"Blues\", extent=[-100, 100, -100, 100])
+        m = ax_hm.imshow(values[:,:],cmap="Blues", extent=[-100, 100, -100, 100])
         ax_hm.grid(False)
-        ax_hm.set_ylabel(\"t-SNE Second Component\")
-        ax_hm.set_xlabel(\"t-SNE First Component\")
-        fig.colorbar(m, ax=(ax_hm), use_gridspec=True, label=\"Schedule Inconsistency\")
+        ax_hm.set_ylabel("t-SNE Second Component")
+        ax_hm.set_xlabel("t-SNE First Component")
+        fig.colorbar(m, ax=(ax_hm), use_gridspec=True, label="Schedule Inconsistency")
         return fig
     _fig = _()
-    _fig.savefig(\"figures/mnist_density_transport.pdf\")
+    _fig.savefig("figures/mnist_density_transport.pdf")
     _fig
-    """,
-    name="_"
-)
+    return
+
+
+@app.cell
+def _(plt, transformed_data):
+    def _():
+        fig, axs = plt.subplots(nrows=2, ncols=2)
+    
+        for samples, samples_data in transformed_data.groupby("samples"):
+            samples_data = samples_data.copy(deep=False)
+            samples_data = samples_data[samples_data["density"] > 0.01]
+
+        return fig
+    _fig = _()
+    _fig
+    return
 
 
 @app.cell

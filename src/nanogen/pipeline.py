@@ -181,7 +181,7 @@ class GenerativePipeline(ty.Generic[T]):
         model : GenerativeModel = accelerator.prepare(self.model)
         model.eval()
 
-        if cond is None:
+        if cond is None and self.datapoint.has_cond:
             loader = self.train_data.loader(batch_size=N, shuffle=True) # type: ignore
             cond = next(iter(loader)).cond # type: ignore
             cond = cond.to(accelerator.device) # type: ignore

@@ -89,9 +89,10 @@ class SimpleDiffusionMLP(Diffuser):
         assert isinstance(sample_structure, torch.Tensor), "sample_structure must be a torch.Tensor"
         sample_features = sample_structure.nelement()
 
+        self.has_cond = cond_structure is not None
         layers = []
         embed_layers = []
-        features = (sample_features + 1,) + tuple(hidden_features)
+        features = (sample_features + (1 if self.has_cond else 0),) + tuple(hidden_features)
         for in_dim, out_dim in itertools.pairwise(features):
             layers.append(nn.Linear(in_dim, out_dim))
             embed_layers.append(nn.Linear(embed_features, 2*out_dim))
@@ -111,7 +112,8 @@ class SimpleDiffusionMLP(Diffuser):
         x = x.flatten(1)
         x_in = x
         # sigma = sigma.squeeze()[...,None] * torch.ones_like(cond) # type: ignore
-        x = torch.concatenate([x, cond], dim=-1) # type: ignore
+        if self.has_cond:
+            x = torch.concatenate([x, cond], dim=-1) # type: ignore
         # for layer in self.layers:
         #     x = layer(x)
         #     x = F.gelu(x)
