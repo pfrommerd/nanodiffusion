@@ -162,6 +162,7 @@ class Unet(Diffuser):
                 skip_channels.append(block_in)
                 red_factor *= 2
             self.downs.append(down)
+        assert block_in is not None
         # Middle
         self.mid = CondSequential(
             make_block(block_in, block_in),

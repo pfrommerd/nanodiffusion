@@ -6,17 +6,17 @@ parameters:
     wandb:
         value: true
     batch_size:
-        value: 256
+        value: 128
     num_samples:
         value: 10_000
     artifact:
         values:
-            - dpfrommer-projects/nanogen_mnist/diffuser:v19
-            - dpfrommer-projects/nanogen_mnist/diffuser:v20
-            - dpfrommer-projects/nanogen_mnist/diffuser:v21
-            - dpfrommer-projects/nanogen_mnist/diffuser:v22
-            - dpfrommer-projects/nanogen_mnist/diffuser:v23
-            - dpfrommer-projects/nanogen_mnist/diffuser:v24
+            - dpfrommer-projects/nanogen_mnist/diffuser:v25
+            - dpfrommer-projects/nanogen_mnist/diffuser:v26
+            - dpfrommer-projects/nanogen_mnist/diffuser:v27
+            - dpfrommer-projects/nanogen_mnist/diffuser:v28
+            - dpfrommer-projects/nanogen_mnist/diffuser:v29
+            - dpfrommer-projects/nanogen_mnist/diffuser:v30
 command:
     - ${env}
     - ${program}

@@ -49,13 +49,13 @@ def divergence_diff(a, b, x) -> torch.Tensor:
     div_b = torch.gather(all_par_b, dim=1, index=i.unsqueeze(1))
     return div_a - div_b
 
-def measure_si(model, final_samples, sigma) -> torch.Tensor:
+def measure_si(model, cond, final_samples, sigma) -> torch.Tensor:
     inter_samples = model.generate_forward(final_samples, sigma)
 
     orig_shape = inter_samples.shape
     inter_samples_flat = inter_samples.reshape(inter_samples.shape[0], -1)
     inter_samples_flat = inter_samples_flat.detach().requires_grad_()
-    pred = model.diffuser(inter_samples_flat.reshape(*orig_shape), sigma)
+    pred = model.diffuser(inter_samples_flat.reshape(*orig_shape), sigma, cond=cond)
     pred = pred.reshape(inter_samples.shape[0], -1)
 
     x_flat = inter_samples_flat
@@ -86,10 +86,10 @@ def measure_si(model, final_samples, sigma) -> torch.Tensor:
     # si = si.abs().sqrt().mean().square()
     return si
 
-def measure_si_traj(model, final_samples, sigmas):
+def measure_si_traj(model, cond, final_samples, sigmas):
     # return torch.zeros(len(inter_samples), device=final_samples.device)
     return torch.stack([
-        measure_si(model, final_samples, sigma)
+        measure_si(model, cond, final_samples, sigma)
         for sigma in sigmas[::4]
     ], dim=0)
 
@@ -124,17 +124,17 @@ def data_generator(pipeline, accelerator, samples_per_cond):
         )
         ddpm_samples = list(model.generate(sample_structure,
                     cond=cond_ex, gamma=1.0, mu=0.5))
-        ddpm_si = measure_si_traj(model, ddpm_samples[-1], model.gen_sigmas)
+        ddpm_si = measure_si_traj(model, cond_ex, ddpm_samples[-1], model.gen_sigmas)
         ddpm_samples = ddpm_samples[-1]
 
         ddim_samples = list(model.generate(sample_structure,
                     cond=cond_ex, gamma=1.0, mu=0.))
-        ddim_si = measure_si_traj(model, ddim_samples[-1], model.gen_sigmas)
+        ddim_si = measure_si_traj(model, cond_ex, ddim_samples[-1], model.gen_sigmas)
         ddim_samples = ddim_samples[-1]
 
         accel_samples = list(model.generate(sample_structure,
                     cond=cond_ex, gamma=2.0, mu=0.))
-        accel_si = measure_si_traj(model, accel_samples[-1], model.gen_sigmas)
+        accel_si = measure_si_traj(model, cond_ex, accel_samples[-1], model.gen_sigmas)
         accel_samples = accel_samples[-1]
         yield (cond, (ddpm_samples, ddpm_si),
             (ddim_samples, ddim_si), (accel_samples, accel_si)
