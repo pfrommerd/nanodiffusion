@@ -133,22 +133,28 @@ def lin_interpolate(trajectory):
     return trajectory
 
 def generate_trajectories(rng: Rng, maze: Maze, trajectory_length: int):
-    col_weights = np.exp(-np.arange(maze.num_cols)) + np.exp(-np.arange(maze.num_cols))[::-1]
+    col_weights = np.exp(-0.5*np.arange(maze.num_cols)) + np.exp(-0.5*np.arange(maze.num_cols))[::-1]
     col_weights = col_weights / col_weights.sum()
     while True:
-        start_row, end_row = rng.integers(0, maze.num_rows, (2,))
-        # generate the end column randomly and the start column weighted toward the left or right side
+        start_row = rng.integers(0, maze.num_rows, ())
         start_col = rng.choice(maze.num_cols, (), p=col_weights)
-        end_col = rng.integers(0, maze.num_cols, ())
-        start, end = maze.grid[start_row][start_col], maze.grid[end_row][end_col]
-        path = maze_solver.solve(rng, maze, start, end)
+        # generate the end column randomly and the start column weighted toward the left or right side
+        end_row, end_col = maze.num_rows // 2, maze.num_cols // 2
 
-        trajectory = np.array([(c.col + 0.5, c.row + 0.5) for c in path], dtype=np.float32)
+        start, end = maze.grid[start_row][start_col], maze.grid[end_row][end_col]
+        solutions = maze_solver.solve(rng, maze, start, end, all_paths=True)
+        weights = np.array([len(s) for s in solutions])
+        weights = np.exp(-(weights - weights.min()))
+        weights = weights / weights.sum()
+
+        solution = rng.choice(len(solutions), p=weights)
+        solution = solutions[solution]
+
+        trajectory = np.array([(c.col + 0.5, c.row + 0.5) for c in solution], dtype=np.float32)
         trajectory += rng.normal(0, 0.2, trajectory.shape).astype(np.float32).clip(-0.3, 0.3)
         trajectory = lin_interpolate(lin_interpolate(trajectory))
-        trajectory += rng.normal(0, 0.05, trajectory.shape).astype(np.float32).clip(-0.1, 0.1)
         trajectory = lin_interpolate(trajectory)
-        trajectory = bezier_curve(trajectory, TRAJECTORY_LENGTH)
+        trajectory = bezier_curve(trajectory, TRAJECTORY_LENGTH + 4)[2:-2]
         yield trajectory / np.array([maze.num_cols, maze.num_rows]) * 2 - 1
 
 rng = np.random.default_rng(seed=SEED)

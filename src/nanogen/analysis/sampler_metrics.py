@@ -3,6 +3,8 @@ from nanoconfig import config, Config, field, MISSING
 
 from nanoconfig.experiment import ExperimentConfig, Experiment
 
+from nanogen.models.diffusion import DiffusionModel
+
 from ..pipeline import GenerativePipeline
 from ..utils import setup_logging
 
@@ -25,6 +27,8 @@ class MetricsConfig(Config):
     artifact: str
     num_samples: int
     batch_size: int
+    timesteps: int
+    eval_timesteps_interval: int
     experiment : ExperimentConfig = field(flat=True)
 
 def sq_norm(M, k):
@@ -93,7 +97,7 @@ def measure_si_traj(model, cond, final_samples, sigmas):
         for sigma in sigmas
     ], dim=0)
 
-def data_generator(pipeline, accelerator, samples_per_cond):
+def data_generator(pipeline, accelerator, samples_per_cond, timesteps_interval):
     logger.info("Computing conditioning bounds...")
     assert pipeline.test_data is not None
     cond_min, cond_max = None, None
@@ -124,17 +128,17 @@ def data_generator(pipeline, accelerator, samples_per_cond):
         )
         ddpm_samples = list(model.generate(sample_structure,
                     cond=cond_ex, gamma=1.0, mu=0.5))
-        ddpm_si = measure_si_traj(model, cond_ex, ddpm_samples[-1], model.gen_sigmas[::4])
+        ddpm_si = measure_si_traj(model, cond_ex, ddpm_samples[-1], model.gen_sigmas[::timesteps_interval])
         ddpm_samples = ddpm_samples[-1]
 
         ddim_samples = list(model.generate(sample_structure,
                     cond=cond_ex, gamma=1.0, mu=0.))
-        ddim_si = measure_si_traj(model, cond_ex, ddim_samples[-1], model.gen_sigmas[::4])
+        ddim_si = measure_si_traj(model, cond_ex, ddim_samples[-1], model.gen_sigmas[::timesteps_interval])
         ddim_samples = ddim_samples[-1]
 
         accel_samples = list(model.generate(sample_structure,
                     cond=cond_ex, gamma=2.0, mu=0.))
-        accel_si = measure_si_traj(model, cond_ex, accel_samples[-1], model.gen_sigmas[::4])
+        accel_si = measure_si_traj(model, cond_ex, accel_samples[-1], model.gen_sigmas[::timesteps_interval])
         accel_samples = accel_samples[-1]
         yield (cond, (ddpm_samples, ddpm_si),
             (ddim_samples, ddim_si), (accel_samples, accel_si)
@@ -161,10 +165,13 @@ def _run(experiment: Experiment):
     with artifact.open_file("model.safetensors") as f:
         pipeline = GenerativePipeline.load(f)
 
+    assert isinstance(pipeline.model, DiffusionModel)
+    pipeline.model.gen_sigmas = pipeline.model.train_noise_schedule.sample_sigmas(config.timesteps)
+
     rows = []
     for i, (cond, (ddpm_samples, ddpm_si), (ddim_samples, ddim_si),
                     (accel_samples, accel_si)) in enumerate(rich.progress.track(itertools.islice(
-                data_generator(pipeline, accelerator, config.batch_size), config.num_samples
+                data_generator(pipeline, accelerator, config.batch_size, config.eval_timesteps_interval), config.num_samples
             ), total=config.num_samples)):
         cond = pytree.tree_map(
             lambda x: x.cpu().numpy() if isinstance(x, torch.Tensor) else x,
@@ -219,7 +226,9 @@ def main():
         num_samples=100,
         experiment=ExperimentConfig(
             wandb=True
-        )
+        ),
+        timesteps=64,
+        eval_timesteps_interval=8
     )
     options = Options.as_options(MetricsConfig, default)
     config : MetricsConfig = options.from_parsed(options.parse())

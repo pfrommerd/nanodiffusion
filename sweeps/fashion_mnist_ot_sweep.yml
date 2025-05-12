@@ -1,0 +1,23 @@
+program: metrics
+project: nanogen_fashion_mnist
+name: mnist_fashion_metrics
+method: grid
+parameters:
+    wandb:
+        value: true
+    batch_size:
+        value: 128
+    num_samples:
+        value: 5_000
+    artifact:
+        values:
+            - dpfrommer-projects/nanogen_fashion_mnist/diffuser:v4
+            - dpfrommer-projects/nanogen_fashion_mnist/diffuser:v5
+            - dpfrommer-projects/nanogen_fashion_mnist/diffuser:v6
+            - dpfrommer-projects/nanogen_fashion_mnist/diffuser:v7
+            - dpfrommer-projects/nanogen_fashion_mnist/diffuser:v8
+            - dpfrommer-projects/nanogen_fashion_mnist/diffuser:v9
+command:
+    - ${env}
+    - ${program}
+    - ${args}

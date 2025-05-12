@@ -10,7 +10,7 @@ parameters:
         #model.diffusion.sampler_preset:
         #values: ["ddim", "ddpm", "accel"]
     limit_data:
-        values: [1_000, 2_000, 4_000, 6_000, 8_000]
+        values: [2_000, 4_000, 6_000, 8_000]
     batch_size:
         value: 128
     gen_batch_size:
@@ -18,12 +18,12 @@ parameters:
     model.diffusion.sample_timesteps:
         value: 16
     model.diffusion.nn.unet.base_channels:
-        value: 32
+        value: 64
     model.diffusion.nn.unet.num_groups:
-        value: 16
+        value: 32
     iterations:
         # value: 150 # for smoke testing
-        value: 30_000
+        value: 100_000
     optimizer.lr:
         value: 0.0005
     data:

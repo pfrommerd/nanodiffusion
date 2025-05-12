@@ -24,60 +24,40 @@ def _():
 
 @app.cell
 def _():
-    from nanogen.optimizers import AdamwConfig
-    from nanogen.schedules import LogLinearScheduleConfig
-    from nanogen.models.mlp import MlpConfig
-    from nanogen.datasets.trajectory import TrajectoryDataConfig
-    return (
-        AdamwConfig,
-        LogLinearScheduleConfig,
-        MlpConfig,
-        TrajectoryDataConfig,
-    )
+    from mazelib.maze import Maze
+    from mazelib.generator import DepthFirstGenerator
+    from mazelib.solver import DjikstraSolver
+
+    import numpy as np
+    import numpy.random
+    rng = numpy.random.default_rng(seed=42)
+
+    generator = DepthFirstGenerator()
+    maze = Maze(8,8)
+    maze = generator.generate(rng, maze)
+    cells = maze.cells
+    for i in rng.integers(0, len(cells), size=(3,)):
+        nr = rng.integers(0, len(cells[i].unreachable_neighbors))
+        cells[i].remove_walls(cells[i].unreachable_neighbors[nr])
+    return DjikstraSolver, maze, np, rng
 
 
 @app.cell
-def _(logging):
-    logger = logging.getLogger("nanogen")
-    return (logger,)
+def _(DjikstraSolver, maze, np, rng):
+    solver = DjikstraSolver()
+    solutions = solver.solve(rng, maze, maze.grid[1][1], maze.grid[4][4], all_paths=True)
+    solutions = [np.array([(c.col + 0.5, -c.row - 0.5) for c in path]) for path in solutions]
+    return (solutions,)
 
 
 @app.cell
-def _(
-    AdamwConfig,
-    DataLoader,
-    DiffuserConfig,
-    ExperimentConfig,
-    LogLinearScheduleConfig,
-    MlpConfig,
-    TrainConfig,
-    TrajectoryDataConfig,
-):
-    config = TrainConfig(
-        experiment=ExperimentConfig(clearml=True),
-        diffuser=DiffuserConfig(
-            optimizer=AdamwConfig(lr=4e-3),
-            schedule=LogLinearScheduleConfig(
-                sigma_min=1e-3, sigma_max=10, timesteps=512
-            ),
-            model=MlpConfig(),
-            data=TrajectoryDataConfig(),
-            iterations=200_000,
-            batch_size=1024
-        )
-    )
-    _, test_data = config.diffuser.data.create()
-    test_samples = next(iter(DataLoader(test_data, batch_size=5)))
-    test_data.visualize_batch(test_samples)
-    return (config,)
-
-
-@app.cell
-def _(config, logger, nanogen):
-    nanogen.setup_logging()
-    model = config.run(logger)
-    samples = model.sample(16, seed=1)
-    model.test_data.visualize_batch(samples)
+def _(maze, solutions):
+    import plotly.graph_objects as go
+    go.Figure([
+        maze.render_plotly()
+    ] + [
+        go.Scatter(x=solutions[i][:,0],y=solutions[i][:,1]) for i in range(len(solutions))
+    ])
     return
 
 

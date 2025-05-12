@@ -274,9 +274,28 @@ def _(
 
 @app.cell
 def _(plt, sis):
-    plt.imshow(sis["continuous_modes"].mean(2), extent=[-1, 1, 0, 1])
-    plt.grid(False)
-    plt.show()
+    def _():
+        fig, axs = plt.subplots(ncols=1, nrows=2, figsize=(6, 7))
+        c1 = axs[0].imshow(sis["two_modes"].mean(2), extent=[-1, 1, 0, 1], cmap="Blues")
+        axs[0].grid(False)
+        c2 = axs[1].imshow(sis["continuous_modes"].mean(2), extent=[-1, 1, 0, 1], cmap="Blues")
+        axs[1].grid(False)
+        fig.colorbar(c1, ax=axs[0], label="Schedule Deviation")
+        fig.colorbar(c2, ax=axs[1], label="Schedule Deviation")
+
+        axs[0].set_xticks([-1, -0.5, 0., 0.5, 1.])
+        axs[1].set_xticks([-1, -0.5, 0., 0.5, 1.])
+
+        axs[0].set_title("Discrete Conditioning")
+        axs[1].set_title("Continuous Conditioning")
+        axs[0].set_ylabel("Timestep")
+        axs[1].set_ylabel("Timestep")
+        axs[0].set_xlabel("Conditioning Value")
+        axs[1].set_xlabel("Conditioning Value")
+        return fig
+    _fig = _()
+    _fig.savefig("figures/low_dim_over_time.pdf", bbox_inches="tight")
+    _fig
     return
 
 
@@ -323,21 +342,21 @@ def _(all_pipelines, np, plt, sis, torch):
     _axs[1,3].set_xlim([0, 1])
 
 
-    _axs[0,0].set_ylabel("Value")
-    _axs[1,0].set_ylabel("Value")
+    _axs[0,0].set_ylabel("Generated Value")
+    _axs[1,0].set_ylabel("Generated Value")
     _axs[1,0].set_xlabel("Conditioning Value")
     _axs[1,1].set_xlabel("Conditioning Value")
     _axs[1,2].set_xlabel("Conditioning Value")
 
-    _axs[0,3].set_ylabel("Total Schedule Inconsistency")
-    _axs[1,3].set_ylabel("Total Schedule Inconsistency")
+    _axs[0,3].set_ylabel("Total Schedule Deviation")
+    _axs[1,3].set_ylabel("Total Schedule Deviation")
 
     _axs[1,3].set_xlabel("Conditioning Value")
 
     _axs[0,0].set_title("Training Data")
     _axs[0,1].set_title("Learned Denoiser")
     _axs[0,2].set_title("Closed-Form Smooth Interpolator")
-    _axs[0,3].set_title("NN Schedule Inconsistency")
+    _axs[0,3].set_title("NN Schedule Deviation")
 
     _fig.savefig("figures/low_dim_visualization.pdf", bbox_inches="tight")
     _fig

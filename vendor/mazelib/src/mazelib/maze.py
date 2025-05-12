@@ -114,25 +114,8 @@ class Cell:
             return True
         return False
 
-    # def _remove_walls_entry_exit(self):
-    #     if self.row == 0:
-    #         self.walls.top = False
-    #     elif self.row == self.maze.num_rows - 1:
-    #         self.walls.bottom = False
-    #     elif self.col == 0:
-    #         self.walls.left = False
-    #     elif self.col == self.maze.num_cols - 1:
-    #         self.walls.right = False
-
-    # def set_type(self, type: CellType):
-    #     if self.type == type:
-    #         return
-    #     if type == CellType.ENTRY or type == CellType.EXIT:
-    #         self._remove_walls_entry_exit()
-    #     # Remove from old type list
-    #     self.maze.type_cells[self.type].remove(self)
-    #     self.type = type
-    #     self.maze.type_cells[self.type].append(self)
+    def __repr__(self):
+        return f"Cell({self.row},{self.col})"
 
     def __hash__(self):
         return hash((id(self.maze), self.row, self.col))
