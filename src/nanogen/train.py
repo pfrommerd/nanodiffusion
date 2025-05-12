@@ -28,6 +28,7 @@ class TrainConfig:
     pipeline: PipelineConfig = field(flat=True)
     experiment: ExperimentConfig = field(flat=True)
     final_checkpoint: bool = True
+    checkpoint_interval: int | None = None
     cpu: bool = False
     distill: bool = False
 
@@ -48,7 +49,8 @@ def _run_experiment(experiment: Experiment):
     pipeline.train(
         progress=True,
         experiment=experiment,
-        accelerator=a
+        accelerator=a,
+        checkpoint_interval=config.checkpoint_interval
     )
     if config.final_checkpoint:
         with experiment.create_artifact("diffuser", type="model") as builder:

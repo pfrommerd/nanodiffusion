@@ -9,6 +9,8 @@ parameters:
         value: 1024
     num_samples:
         value: 5_000
+    timesteps:
+        value: 128
     artifact:
         values:
             - dpfrommer-projects/nanogen_trajectory/diffuser:v47

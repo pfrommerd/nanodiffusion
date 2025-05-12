@@ -199,6 +199,7 @@ class GenerativePipeline(ty.Generic[T]):
               experiment: Experiment | None = None,
               generate_interval : Interval | int | None = None,
               test_interval: Interval | int | None = None,
+              checkpoint_interval: Interval | int | None = None,
               progress : bool = False
             ):
         assert self.train_data is not None, "No training data provided"
@@ -214,6 +215,7 @@ class GenerativePipeline(ty.Generic[T]):
 
         generate_interval = Interval.to_iterations(generate_interval, iterations_per_epoch)
         test_interval = Interval.to_iterations(test_interval, iterations_per_epoch)
+        checkpoint_interval = Interval.to_iterations(checkpoint_interval, iterations_per_epoch)
 
         accelerator = accelerator if accelerator else Accelerator()
 
@@ -331,6 +333,10 @@ class GenerativePipeline(ty.Generic[T]):
                                 *_, train_samples = model.generate(gen_batch.sample)
                                 train_datapoints : T = self.datapoint.with_values(train_samples) # type: ignore
                                 experiment.log({"samples" : train_datapoints.to_result()}, series="test", step=iteration)
+                        if checkpoint_interval and experiment and iteration % checkpoint_interval ==0:
+                            with experiment.create_artifact(f"checkpoint_{iteration}", type="model") as builder:
+                                with builder.create_file("model.safetensors") as f:
+                                    self.save(f)
                     iteration += 1
                     if iteration >= iterations:
                         break
