@@ -28,9 +28,7 @@ def _():
 @app.cell
 def _(wandb):
     api = wandb.Api()
-    # OLD: dpfrommer-projects/nanogen_mnist/nqlofeyh
-    # NEW: dpfrommer-projects/nanogen_mnist/cylpdnas
-    sweep = api.sweep("dpfrommer-projects/nanogen_mnist/cylpdnas")
+    sweep = api.sweep("dpfrommer-projects/nanogen_fashion_mnist/a6py7u6u")
     return api, sweep
 
 
@@ -48,10 +46,9 @@ def _(Path, pd, sweep):
             path = Path(artifact.download()) / "metrics.csv"
             df = pd.read_csv(path)
             df["samples"] = samples
-            idxs = range(0,9)
-            df["ddpm_si"] =  sum(df[f"ddpm_si/{i}"] for i in idxs)/len(idxs)
-            df["ddim_si"] =  sum(df[f"ddim_si/{i}"] for i in idxs)/len(idxs)
-            df["accel_si"] =  sum(df[f"accel_si/{i}"] for i in idxs)/len(idxs)
+            df["ddpm_si"] =  df["ddpm_si/0"] + df["ddpm_si/1"] + df["ddpm_si/2"]
+            df["ddim_si"] =  df["ddim_si/0"] + df["ddim_si/1"] + df["ddim_si/2"]
+            df["accel_si"] =  df["accel_si/0"] + df["accel_si/1"] + df["accel_si/2"]
             data.append(df)
         return pd.concat(data)
     data = load_data()
@@ -63,7 +60,7 @@ def _(np):
     from nanoconfig.data.source import DataRepository
     import nanoconfig.data.utils as data_utils
 
-    mnist_data = DataRepository.default().lookup("mnist")
+    mnist_data = DataRepository.default().lookup("fashion-mnist")
     mnist_data = mnist_data.split("test")
     mnist_labels = np.concatenate(list(data_utils.as_numpy(batch["class"]) for batch in mnist_data.to_batches(columns=["class"])))
     mnist_data = np.concatenate(list(data_utils.as_numpy(batch["tsne"]) for batch in mnist_data.to_batches(columns=["tsne"])))
@@ -97,7 +94,7 @@ def _(calc_density, data, np):
 @app.cell
 def _(transformed_data):
     import pickle
-    pickle.dump(transformed_data, open("figures/mnist_data.pkl", "wb"))
+    pickle.dump(transformed_data, open("figures/fashion_mnist_data.pkl", "wb"))
     return
 
 
@@ -139,15 +136,17 @@ def _(mnist_data, mnist_labels, np, plt, scipy, transformed_data):
             cond = np.stack((sub_data["condition/0"], sub_data["condition/1"]), axis=-1)
             values = scipy.interpolate.griddata(cond, sub_data[column].to_numpy(),
                                                 (grid_x, grid_y), method='nearest')[::-1,:]
+            if i == 0:
+                values = values.clip(0, 150)
+
             if normalize:
                 values = values / values.max()
                 vmin = vmin or values.min()
                 vmax = vmax or 1.
             cbar = ax.imshow(values,cmap="binary", extent=[-100, 100, -100, 100],
-                                                vmin=vmin, vmax=vmax, rasterized=True)
+                                                vmin=vmin, vmax=vmax)
             ax.scatter(mnist_data[::5,0], mnist_data[::5,1],
-                             c=[colors[l] for l in mnist_labels[::5]], s=1.5, alpha=0.8,
-                             rasterized=True)
+                             c=[colors[l] for l in mnist_labels[::5]], s=1.5, alpha=0.8)
             ax.grid(False)
             cbars.append(cbar)
             ax.set_xlim([-100, 100])
@@ -157,20 +156,20 @@ def _(mnist_data, mnist_labels, np, plt, scipy, transformed_data):
             #ax.set_xlabel("t-SNE First Component")
         fig.colorbar(cbars[0], ax=axs, label=label,fraction=0.03, pad=0.01, shrink=0.7)
         return fig
-    _fig, _axs = plt.subplots(ncols=3, nrows=2, figsize=(10,7), sharex="col", sharey="row")
-    _fig.subplots_adjust(hspace=-0.1, wspace=0.18)
+    _fig, _axs = plt.subplots(ncols=3, nrows=2, figsize=(15,9), sharex="col", sharey="row")
+    _fig.subplots_adjust(hspace=0.06, wspace=0.06)
     #_fig.tight_layout()
-    _fig = heatmaps(_fig, _axs[0], "ddpm_ddim_dist", "DDPM/DDIM OT Distance", 0.5, 8)
-    _fig = heatmaps(_fig, _axs[1], "ddpm_si", "DDPM Schedule Deviation", 50, 170)
+    _fig = heatmaps(_fig, _axs[0], "ddpm_ddim_dist", "DDPM/DDIM OT Distance", 0.5, 7)
+    _fig = heatmaps(_fig, _axs[1], "ddpm_si", "DDPM Schedule Deviation", 50, 310)
     _axs[-1][0].set_xlabel("t-SNE First Component")
     _axs[-1][1].set_xlabel("t-SNE First Component")
     _axs[-1][2].set_xlabel("t-SNE First Component")
 
-    _axs[0][0].set_title("MNIST N=10000")
-    _axs[0][1].set_title("MNIST N=30000")
-    _axs[0][2].set_title("MNIST N=60000")
+    _axs[0][0].set_title("Conditional Fashion-MNIST N=10000")
+    _axs[0][1].set_title("Conditional Fashion-MNIST N=30000")
+    _axs[0][2].set_title("Conditional Fashion-MNIST N=60000")
 
-    _fig.savefig("figures/mnist_ddpm_ddim_dist.pdf", bbox_inches="tight")
+    _fig.savefig("figures/fashion_mnist_ddpm_ddim_dist.pdf", bbox_inches="tight")
     _fig
     return (heatmaps,)
 
@@ -179,18 +178,18 @@ def _(mnist_data, mnist_labels, np, plt, scipy, transformed_data):
 def _(heatmaps, plt):
     _fig, _axs = plt.subplots(ncols=3, nrows=6, figsize=(12,25), sharex="col", sharey="row")
     _fig.subplots_adjust(hspace=-0.2, wspace=0.05)
-    _fig = heatmaps(_fig, _axs[0], "ddpm_ddim_dist", "DDPM/DDIM OT Distance", 0.5, 8)
-    _fig = heatmaps(_fig, _axs[1], "ddpm_accel_dist", "DDPM/GE OT Distance", 0.5, 8)
-    _fig = heatmaps(_fig, _axs[2], "ddim_accel_dist", "DDIM/GE OT Distance", 0.5, 8)
-    _fig = heatmaps(_fig, _axs[3], "ddpm_si", "DDPM Schedule Deviation", 50, 150)
-    _fig = heatmaps(_fig, _axs[4], "ddim_si", "DDIM Schedule Deviation", 50, 150)
-    _fig = heatmaps(_fig, _axs[5], "accel_si", "GE Schedule Deviation",  50, 150)
+    _fig = heatmaps(_fig, _axs[0], "ddpm_ddim_dist", "DDPM/DDIM OT Distance", 0.5, 7)
+    _fig = heatmaps(_fig, _axs[1], "ddpm_accel_dist", "DDPM/GE OT Distance", 0.5, 7)
+    _fig = heatmaps(_fig, _axs[2], "ddim_accel_dist", "DDIM/GE OT Distance", 0.5, 7)
+    _fig = heatmaps(_fig, _axs[3], "ddpm_si", "DDPM Schedule Deviation", 50, 300)
+    _fig = heatmaps(_fig, _axs[4], "ddim_si", "DDIM Schedule Deviation", 40, 400)
+    _fig = heatmaps(_fig, _axs[5], "accel_si", "GE Schedule Deviation", 40, 450)
     for _ax in _axs[-1]:
         _ax.set_xlabel("t-SNE First Component")
         _ax.set_xticks([-75, -25, 25, 75])
     for _ax in _axs:
         _ax[0].set_yticks([-75, -25, 25, 75])
-    _fig.savefig("figures/mnist_heatmaps.pdf", bbox_inches="tight")
+    _fig.savefig("figures/fashion_mnist_heatmaps.pdf", bbox_inches="tight")
     _fig
     return
 
@@ -215,36 +214,6 @@ def _():
 
 
 @app.cell
-def _(Path, api, pd):
-    def load_capacity_sweep():
-        sweep = api.sweep("dpfrommer-projects/nanogen_mnist/d00hkee9")
-        artifacts = list(list(a for a in run.logged_artifacts() if a.type == "results")[0]
-                       for run in sweep.runs if list(a for a in run.logged_artifacts() if a.type == "results"))
-        data = []
-        for artifact in artifacts:
-            run = artifact.logged_by()
-            input_artifact = list(a for a in run.used_artifacts() if a.type == "model")[0]
-            cfg = input_artifact.logged_by().config
-            if "checkpoint" in input_artifact.name:
-                iteration = int(input_artifact.name[len("checkpoint_"):].split(":")[0])
-            else:
-                iteration = 300_000
-            channels = cfg["pipeline"]["model"]["nn"]["base_channels"]
-            path = Path(artifact.download()) / "metrics.csv"
-            df = pd.read_csv(path)
-            df["channels"] = channels
-            df["iteration"] = iteration
-            idxs = range(2, 7) # don't include the very beginning or end
-            df["ddpm_si"] =  sum(df[f"ddpm_si/{i}"] for i in idxs)/len(idxs)
-            df["ddim_si"] =  sum(df[f"ddim_si/{i}"] for i in idxs)/len(idxs)
-            df["accel_si"] =  sum(df[f"accel_si/{i}"] for i in idxs)/len(idxs)
-            data.append(df)
-        return pd.concat(data)
-    capacity_data = load_capacity_sweep()
-    return (capacity_data,)
-
-
-@app.cell
 def _(api, pd):
     def load_capacity_train_history():
         sweep = api.sweep("dpfrommer-projects/nanogen_mnist/pjz731bz")
@@ -257,78 +226,21 @@ def _(api, pd):
         return pd.concat(data)
 
     capacity_history_data = load_capacity_train_history()
-    return (capacity_history_data,)
+    return
 
 
 @app.cell
-def _(
-    capacity_data,
-    capacity_history_data,
-    mnist_data,
-    mnist_labels,
-    np,
-    pd,
-    plt,
-    transformed_data,
-):
-    import matplotlib.ticker as ticker
-
+def _(mnist_data, mnist_labels, np, pd, plt, transformed_data):
     def _():
-        fig, axs = plt.subplots(nrows=1, ncols=4, figsize=(15,3))
-        fig.subplots_adjust(wspace=0.3)
-        label = {64: "5.9M", 96: "13.3M", 128: "23.5M", 160: "36.8M"}
-        for (channels, g), color in zip(capacity_history_data.groupby("channels"),
-                                        plt.rcParams['axes.prop_cycle'].by_key()['color']):
-            g = g[g["_step"] >= 30_000].copy()
-            g["step_bin"] = pd.cut(g["_step"], 20)
-            g_step = g.groupby("step_bin", observed=True).max().reset_index()["_step"]
-            g_mean = g.groupby("step_bin", observed=True).median().reset_index()
-            g_upper = g.groupby("step_bin", observed=True).quantile(0.7).reset_index()
-            g_lower = g.groupby("step_bin", observed=True).quantile(0.3).reset_index()
-            if channels <= 64: continue
-            axs[0].plot(g_step, g_mean["loss/test"], alpha=0.7, label=label[channels] + " parameters")#, color=color)
-            axs[0].fill_between(g_step, g_lower["loss/test"], g_upper["loss/test"], alpha=0.3)#, color=color)
-            #axs[0].plot(g_step, g_mean["loss/train"], alpha=0.7, label=label[channels] + " parameters", color=color)
-            #axs[0].fill_between(g_step, g_lower["loss/train"], g_upper["loss/train"], alpha=0.3, color=color)
-
-        axs[0].legend(loc="upper right")
-        axs[0].set_xlim([50_000, 300_000])
-        axs[0].yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"{x:.3f}"))
-        axs[0].set_title("MNIST Test Loss")
-        axs[0].set_xlabel("Training Iteration")
-        axs[0].set_ylabel("Test Loss")
-
-        cd = capacity_data.groupby(["channels","iteration"])[["ddpm_si"]].median().reset_index()
-        cd_upper = capacity_data.groupby(["channels","iteration"])[["ddpm_si"]].quantile(0.7).reset_index()
-        cd_lower = capacity_data.groupby(["channels","iteration"])[["ddpm_si"]].quantile(0.3).reset_index()
-
-        for (channels, g), (_, g_upper), (_, g_lower) in zip(cd.groupby("channels"),
-                                               cd_upper.groupby("channels"), cd_lower.groupby("channels")):
-            g = g[g["iteration"] > 0]
-            g_upper = g_upper[g_upper["iteration"] > 0] 
-            g_lower = g_lower[g_lower["iteration"] > 0]
-            if channels <= 64: continue
-            axs[1].plot(g["iteration"], g["ddpm_si"], label=label[channels] + " parameters")
-            axs[1].fill_between(g["iteration"], g_lower["ddpm_si"], g_upper["ddpm_si"], alpha=0.3)
-
-        axs[1].legend(loc="upper right")
-        axs[1].set_xlim([50_000, 300_000])
-        axs[1].set_title("MNIST SD vs Model Size")
-        axs[1].set_xlabel("Training Iteration")
-        axs[1].set_ylabel("DDPM Schedule Deviation")
-
-
+        fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(10,4))
+    
         td = transformed_data.copy()
         mean_data = td.groupby("samples").median().reset_index()
-        high_data = td.groupby("samples").quantile(0.7).reset_index()
-        low_data = td.groupby("samples").quantile(0.3).reset_index()
-        axs[2].plot(mean_data["samples"],mean_data["ddpm_si"])
-        axs[2].fill_between(mean_data["samples"], low_data["ddpm_si"], high_data["ddpm_si"],
+        high_data = td.groupby("samples").quantile(0.75).reset_index()
+        low_data = td.groupby("samples").quantile(0.25).reset_index()
+        axs[0].plot(mean_data["samples"],mean_data["ddpm_si"])
+        axs[0].fill_between(mean_data["samples"], low_data["ddpm_si"], high_data["ddpm_si"],
                            alpha=0.3)
-        axs[2].set_xlim([10_000, 60_000])
-        axs[2].set_title("MNIST Training Samples vs SD")
-        axs[2].set_xlabel("Training Dataset Size")
-        #axs[2].set_ylabel("DDPM Schedule Deviation")
 
         # The violin plot
         sub_data = transformed_data[transformed_data["samples"] == 60_000]
@@ -343,19 +255,19 @@ def _(
             "ddpm_ddim_dist": ots
         })
         groups = [g["ddpm_si"].to_numpy() for l, g in df.groupby("label")]
-        axs[3].violinplot(groups, np.arange(10))
-        axs[3].set_xticks(np.arange(10))
-        axs[3].set_title("MNIST SD by Class")
-        axs[3].set_xlabel("Digit Label")
-        #axs[3].set_ylabel("DDPM Schedule Deviation")
+        axs[1].violinplot(groups, np.arange(10))
+        axs[1].set_xticks(np.arange(10), ["T-shirt", "Trouser","Pullover"," Dress", " Coat", "Sandal", "Shirt", "Sneaker", "Bag", "Ankle Boot"], rotation=90)
+        axs[0].set_xlim([10_000, 60_000])
 
-        axs[0].xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"{int(x//1_000)}k"))
-        axs[1].xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"{int(x//1_000)}k"))
-        axs[2].xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"{int(x//1_000)}k"))
+        axs[0].set_title("Fashion-MNIST Training Samples vs SD")
+        axs[0].set_xlabel("Training Samples")
+        axs[0].set_ylabel("DDPM Schedule Deviation")
 
+        axs[1].set_title("Fashion-MNIST SD by Class")
+        axs[1].set_ylabel("DDPM Schedule Deviation")
         return fig
     _fig = _()
-    _fig.savefig("figures/mnist_expanded.pdf", bbox_inches="tight")
+    _fig.savefig("figures/fashion_mnist_expanded.pdf", bbox_inches="tight")
     _fig
     return
 
@@ -386,27 +298,28 @@ def _(HandlerSquare, plt, transformed_data):
 @app.cell
 def _(HandlerSquare, mnist_data, mnist_labels, plt):
     _colors = [
-    "#4c72b0",  # blue
-    "#dd8452",  # orange
-    "#55a868",  # green
-    "#c44e52",  # red
-    "#8172b2",  # purple
-    "#937860",  # brown
-    "#da8bc3",  # pink
-    "#b07aa1",  # magenta
-    "#ccb974",  # khaki
-    "#64b5cd",  # cyan
+        "#4c72b0",  # blue
+        "#dd8452",  # orange
+        "#55a868",  # green
+        "#c44e52",  # red
+        "#8172b2",  # purple
+        "#937860",  # brown
+        "#da8bc3",  # pink
+        "#b07aa1",  # magenta
+        "#ccb974",  # khaki
+        "#64b5cd",  # cyan
     ]
     _scatters = []
-    plt.title("MNIST Conditioning")
-    for _i, _c in enumerate(_colors):
+    plt.title("Fashion-MNIST Conditioning")
+    for _i, (_c, _n) in enumerate(zip(_colors, ["T-shirt", "Trouser","Pullover"," Dress", " Coat", "Sandal", "Shirt", "Sneaker", "Bag", "Ankle Boot"])):
         _d = mnist_data[::5][mnist_labels[::5] == _i]
         _s = plt.scatter(_d[:,0],_d[:,1], color=_c, s=10, alpha=0.8, rasterized=True,
-                   label=f"{_i}")
+                   label=f"{_n}")
         _scatters.append(_s)
     plt.legend(loc="right", handler_map={s: HandlerSquare() for s in _scatters},
-              bbox_to_anchor=(1.15, 0.5))
-    plt.savefig("figures/mnist_examples.pdf")
+              bbox_to_anchor=(1.3, 0.5))
+    plt.savefig("figures/fashion_mnist_examples.pdf", bbox_inches="tight")
+    plt.show()
     return
 
 

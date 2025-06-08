@@ -1,0 +1,45 @@
+program: metrics
+project: nanogen_fashion_mnist
+name: fashion_mnist_capacity_metrics
+method: grid
+parameters:
+    wandb:
+        value: true
+    batch_size:
+        value: 128
+    num_samples:
+        value: 3_000
+    artifact:
+        values:
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_0:v0
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_0:v2
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_0:v3
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_0:v4
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_50000:v0
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_50000:v2
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_50000:v3
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_50000:v4
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_100000:v0
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_100000:v2
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_100000:v3
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_100000:v4
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_150000:v0
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_150000:v1
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_150000:v2
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_150000:v3
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_200000:v0
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_200000:v1
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_200000:v2
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_200000:v3
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_250000:v0
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_250000:v1
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_250000:v2
+            - dpfrommer-projects/nanogen_fashion_mnist/checkpoint_250000:v3
+            - dpfrommer-projects/nanogen_fashion_mnist/diffuser:v10
+            - dpfrommer-projects/nanogen_fashion_mnist/diffuser:v11
+            - dpfrommer-projects/nanogen_fashion_mnist/diffuser:v12
+            - dpfrommer-projects/nanogen_fashion_mnist/diffuser:v13
+command:
+    - ${env}
+    - ${program}
+    - ${args}

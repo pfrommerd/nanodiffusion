@@ -1,0 +1,36 @@
+program: train
+project: nanogen_fashion_mnist
+name: sampler_capacity_sweep
+method: grid
+parameters:
+    wandb:
+        value: true
+    model.diffusion.nn.type:
+        value: unet
+        #model.diffusion.sampler_preset:
+        #values: ["ddim", "ddpm", "accel"]
+    batch_size:
+        value: 128
+    gen_batch_size:
+        value: 64
+    model.diffusion.sample_timesteps:
+        value: 32
+    model.diffusion.nn.unet.base_channels:
+        values: [64, 96, 128, 160]
+    model.diffusion.nn.unet.num_groups:
+        value: 32
+    iterations:
+        # value: 150 # for smoke testing
+        value: 300_000
+    checkpoint_interval:
+        value: 50_000
+    optimizer.lr:
+        value: 0.0003
+    data:
+        value: fashion-mnist
+    distill:
+        value: false
+command:
+    - ${env}
+    - ${program}
+    - ${args}

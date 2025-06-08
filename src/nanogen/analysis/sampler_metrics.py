@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 @config
 class MetricsConfig(Config):
     artifact: str
+    divergence_dims: int
     num_samples: int
     batch_size: int
     timesteps: int
@@ -39,21 +40,26 @@ def sum_except_dim(x, dim):
     dims.remove(dim)
     return torch.sum(x, dim=dims, keepdim=True)
 
-def divergence_diff(a, b, x) -> torch.Tensor:
+def divergence_diff(nd, a, b, x) -> torch.Tensor:
     assert a.shape == b.shape
     assert a.ndim == 2
     # do a "randomized" divergence by picking a random coordinate
     # per element in the batch
-    i = torch.randint(0, a.shape[1], (a.shape[0],), device=a.device)
-    a_elems = torch.gather(a, dim=1, index=i.unsqueeze(1))
-    b_elems = torch.gather(b, dim=1, index=i.unsqueeze(1))
-    all_par_a = torch.autograd.grad(a_elems, x, torch.ones_like(a_elems), retain_graph=True)[0]
-    all_par_b = torch.autograd.grad(b_elems, x, torch.ones_like(b_elems), retain_graph=True)[0]
-    div_a = torch.gather(all_par_a, dim=1, index=i.unsqueeze(1))
-    div_b = torch.gather(all_par_b, dim=1, index=i.unsqueeze(1))
-    return div_a - div_b
+    ests = []
+    for j in range(nd):
+        i = torch.randint(0, a.shape[1], (a.shape[0],), device=a.device)
+        a_elems = torch.gather(a, dim=1, index=i.unsqueeze(1))
+        b_elems = torch.gather(b, dim=1, index=i.unsqueeze(1))
+        all_par_a = torch.autograd.grad(a_elems, x, torch.ones_like(a_elems), retain_graph=True)[0]
+        all_par_b = torch.autograd.grad(b_elems, x, torch.ones_like(b_elems), retain_graph=True)[0]
+        div_a = torch.gather(all_par_a, dim=1, index=i.unsqueeze(1)).squeeze(1)
+        div_b = torch.gather(all_par_b, dim=1, index=i.unsqueeze(1)).squeeze(1)
+        ests.append((div_a - div_b)*a.shape[1])
+    ests = torch.stack(ests, -1)
+    ests = torch.mean(ests, -1)
+    return ests
 
-def measure_si(model, cond, final_samples, sigma) -> torch.Tensor:
+def measure_si(model, cond, final_samples, sigma, nd) -> torch.Tensor:
     inter_samples = model.generate_forward(final_samples, sigma)
 
     orig_shape = inter_samples.shape
@@ -69,35 +75,29 @@ def measure_si(model, cond, final_samples, sigma) -> torch.Tensor:
     log_weights = -sq_diffs/2/sigma.squeeze()**2
     weights = torch.nn.functional.softmax(log_weights, dim=0)
     x0_flat = torch.einsum('ij,i...->j...', weights, d_flat)
-    true_exp = (x_flat - x0_flat) / sigma
-
-    div = divergence_diff(pred, true_exp, inter_samples_flat).detach()
+    true_eps = (x_flat - x0_flat) / sigma
+    div = divergence_diff(nd, pred, true_eps, inter_samples_flat).detach()
     pred = pred.reshape(*orig_shape).detach()
-    true_exp = true_exp.reshape(*orig_shape).detach()
+    true_eps = true_eps.reshape(*orig_shape).detach()
 
-    # The "true" schedule inconsistency is this
-    # scales by dot sigma / sigma * p(x_t)
-    # we use this to make everything noise-scale-invariant
-    # (note the div scales with sigma^(-1), so
-    # multiplying that by sigma should be fine)
-
+    # we scale the div comp by sigma to match the scaling of the dot_comp
+    # note that by the manner in which we have parameterized "v"
     div_comp = sigma * div
-    dot_comp = torch.sum(true_exp.reshape(true_exp.shape[0], -1) *
-            (pred - true_exp).reshape(pred.shape[0], -1), dim=1)
+    dot_comp = torch.sum(true_eps.reshape(true_eps.shape[0], -1) *
+            (true_eps - pred).reshape(pred.shape[0], -1), dim=1)
     si = div_comp + dot_comp
-    # print(div_comp, dot_comp, si, si.abs().mean())
     si = si.abs().mean()
-    # si = si.abs().sqrt().mean().square()
     return si
 
-def measure_si_traj(model, cond, final_samples, sigmas):
+def measure_si_traj(model, cond, final_samples, sigmas, nd):
     # return torch.zeros(len(inter_samples), device=final_samples.device)
     return torch.stack([
-        measure_si(model, cond, final_samples, sigma)
+        measure_si(model, cond, final_samples, sigma, nd)
         for sigma in sigmas
     ], dim=0)
 
-def data_generator(pipeline, accelerator, samples_per_cond, timesteps_interval):
+def data_generator(pipeline, accelerator, samples_per_cond, timesteps_interval,
+                            divergence_dims):
     logger.info("Computing conditioning bounds...")
     assert pipeline.test_data is not None
     cond_min, cond_max = None, None
@@ -114,6 +114,7 @@ def data_generator(pipeline, accelerator, samples_per_cond, timesteps_interval):
     assert cond_min is not None and cond_max is not None
     logger.info("Computed bounds.")
     model = accelerator.prepare(pipeline.model)
+
     while True:
         cond = pytree.tree_map(
             lambda min, max: (torch.rand(min.shape,
@@ -128,17 +129,17 @@ def data_generator(pipeline, accelerator, samples_per_cond, timesteps_interval):
         )
         ddpm_samples = list(model.generate(sample_structure,
                     cond=cond_ex, gamma=1.0, mu=0.5))
-        ddpm_si = measure_si_traj(model, cond_ex, ddpm_samples[-1], model.gen_sigmas[::timesteps_interval])
+        ddpm_si = measure_si_traj(model, cond_ex, ddpm_samples[-1], model.gen_sigmas[::timesteps_interval], divergence_dims)
         ddpm_samples = ddpm_samples[-1]
 
         ddim_samples = list(model.generate(sample_structure,
                     cond=cond_ex, gamma=1.0, mu=0.))
-        ddim_si = measure_si_traj(model, cond_ex, ddim_samples[-1], model.gen_sigmas[::timesteps_interval])
+        ddim_si = measure_si_traj(model, cond_ex, ddim_samples[-1], model.gen_sigmas[::timesteps_interval], divergence_dims)
         ddim_samples = ddim_samples[-1]
 
         accel_samples = list(model.generate(sample_structure,
                     cond=cond_ex, gamma=2.0, mu=0.))
-        accel_si = measure_si_traj(model, cond_ex, accel_samples[-1], model.gen_sigmas[::timesteps_interval])
+        accel_si = measure_si_traj(model, cond_ex, accel_samples[-1], model.gen_sigmas[::timesteps_interval], divergence_dims)
         accel_samples = accel_samples[-1]
         yield (cond, (ddpm_samples, ddpm_si),
             (ddim_samples, ddim_si), (accel_samples, accel_si)
@@ -171,7 +172,7 @@ def _run(experiment: Experiment):
     rows = []
     for i, (cond, (ddpm_samples, ddpm_si), (ddim_samples, ddim_si),
                     (accel_samples, accel_si)) in enumerate(rich.progress.track(itertools.islice(
-                data_generator(pipeline, accelerator, config.batch_size, config.eval_timesteps_interval), config.num_samples
+                data_generator(pipeline, accelerator, config.batch_size, config.eval_timesteps_interval, config.divergence_dims), config.num_samples
             ), total=config.num_samples)):
         cond = pytree.tree_map(
             lambda x: x.cpu().numpy() if isinstance(x, torch.Tensor) else x,
@@ -224,6 +225,7 @@ def main():
         artifact=MISSING,
         batch_size=64,
         num_samples=100,
+        divergence_dims=1,
         experiment=ExperimentConfig(
             wandb=True
         ),

@@ -1,0 +1,22 @@
+program: metrics
+project: nanogen_mnist
+name: mnist_capacity_metrics
+method: grid
+parameters:
+    wandb:
+        value: true
+    batch_size:
+        value: 128
+    num_samples:
+        value: 3_000
+    artifact:
+        values:
+            - dpfrommer-projects/nanogen_mnist/checkpoint_50000:v0
+            - dpfrommer-projects/nanogen_mnist/checkpoint_100000:v0
+            - dpfrommer-projects/nanogen_mnist/checkpoint_150000:v0
+            - dpfrommer-projects/nanogen_mnist/checkpoint_200000:v0
+            - dpfrommer-projects/nanogen_mnist/checkpoint_250000:v0
+command:
+    - ${env}
+    - ${program}
+    - ${args}

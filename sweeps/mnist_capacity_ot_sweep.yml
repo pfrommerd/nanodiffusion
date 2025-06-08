@@ -1,0 +1,45 @@
+program: metrics
+project: nanogen_mnist
+name: mnist_capacity_metrics
+method: grid
+parameters:
+    wandb:
+        value: true
+    batch_size:
+        value: 128
+    num_samples:
+        value: 3_000
+    artifact:
+        values:
+            - dpfrommer-projects/nanogen_mnist/checkpoint_0:v1
+            - dpfrommer-projects/nanogen_mnist/checkpoint_0:v2
+            - dpfrommer-projects/nanogen_mnist/checkpoint_0:v3
+            - dpfrommer-projects/nanogen_mnist/checkpoint_0:v4
+            - dpfrommer-projects/nanogen_mnist/checkpoint_50000:v1
+            - dpfrommer-projects/nanogen_mnist/checkpoint_50000:v2
+            - dpfrommer-projects/nanogen_mnist/checkpoint_50000:v3
+            - dpfrommer-projects/nanogen_mnist/checkpoint_50000:v4
+            - dpfrommer-projects/nanogen_mnist/checkpoint_100000:v1
+            - dpfrommer-projects/nanogen_mnist/checkpoint_100000:v2
+            - dpfrommer-projects/nanogen_mnist/checkpoint_100000:v3
+            - dpfrommer-projects/nanogen_mnist/checkpoint_100000:v4
+            - dpfrommer-projects/nanogen_mnist/checkpoint_150000:v1
+            - dpfrommer-projects/nanogen_mnist/checkpoint_150000:v2
+            - dpfrommer-projects/nanogen_mnist/checkpoint_150000:v3
+            - dpfrommer-projects/nanogen_mnist/checkpoint_150000:v4
+            - dpfrommer-projects/nanogen_mnist/checkpoint_200000:v1
+            - dpfrommer-projects/nanogen_mnist/checkpoint_200000:v2
+            - dpfrommer-projects/nanogen_mnist/checkpoint_200000:v3
+            - dpfrommer-projects/nanogen_mnist/checkpoint_200000:v4
+            - dpfrommer-projects/nanogen_mnist/checkpoint_250000:v1
+            - dpfrommer-projects/nanogen_mnist/checkpoint_250000:v2
+            - dpfrommer-projects/nanogen_mnist/checkpoint_250000:v3
+            - dpfrommer-projects/nanogen_mnist/checkpoint_250000:v4
+            - dpfrommer-projects/nanogen_mnist/diffuser:v31
+            - dpfrommer-projects/nanogen_mnist/diffuser:v32
+            - dpfrommer-projects/nanogen_mnist/diffuser:v33
+            - dpfrommer-projects/nanogen_mnist/diffuser:v34
+command:
+    - ${env}
+    - ${program}
+    - ${args}
