@@ -8,7 +8,7 @@ parameters:
     batch_size:
         value: 128
     num_samples:
-        value: 5_000
+        value: 8_000
     artifact:
         values:
             - dpfrommer-projects/nanogen_fashion_mnist/diffuser:v4
