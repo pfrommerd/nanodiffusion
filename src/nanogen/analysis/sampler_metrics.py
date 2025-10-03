@@ -41,7 +41,8 @@ def sum_except_dim(x, dim):
     return torch.sum(x, dim=dims, keepdim=True)
 
 def divergence_diff(nd, a, b, x) -> torch.Tensor:
-    assert a.shape == b.shape
+    if b is not None:
+        assert a.shape == b.shape
     assert a.ndim == 2
     # do a "randomized" divergence by picking a random coordinate
     # per element in the batch
@@ -49,12 +50,15 @@ def divergence_diff(nd, a, b, x) -> torch.Tensor:
     for j in range(nd):
         i = torch.randint(0, a.shape[1], (a.shape[0],), device=a.device)
         a_elems = torch.gather(a, dim=1, index=i.unsqueeze(1))
-        b_elems = torch.gather(b, dim=1, index=i.unsqueeze(1))
         all_par_a = torch.autograd.grad(a_elems, x, torch.ones_like(a_elems), retain_graph=True)[0]
-        all_par_b = torch.autograd.grad(b_elems, x, torch.ones_like(b_elems), retain_graph=True)[0]
         div_a = torch.gather(all_par_a, dim=1, index=i.unsqueeze(1)).squeeze(1)
-        div_b = torch.gather(all_par_b, dim=1, index=i.unsqueeze(1)).squeeze(1)
-        ests.append((div_a - div_b)*a.shape[1])
+        if b is not None:
+            b_elems = torch.gather(b, dim=1, index=i.unsqueeze(1))
+            all_par_b = torch.autograd.grad(b_elems, x, torch.ones_like(b_elems), retain_graph=True)[0]
+            div_b = torch.gather(all_par_b, dim=1, index=i.unsqueeze(1)).squeeze(1)
+            ests.append((div_a - div_b)*a.shape[1])
+        else:
+            ests.append(div_a*a.shape[1])
     ests = torch.stack(ests, -1)
     ests = torch.mean(ests, -1)
     return ests
@@ -76,7 +80,9 @@ def measure_si(model, cond, final_samples, sigma, nd) -> torch.Tensor:
     weights = torch.nn.functional.softmax(log_weights, dim=0)
     x0_flat = torch.einsum('ij,i...->j...', weights, d_flat)
     true_eps = (x_flat - x0_flat) / sigma
-    div = divergence_diff(nd, pred, true_eps, inter_samples_flat).detach()
+    # use zeros for the comparison since true_eps
+    # comes from nabla log p
+    div = divergence_diff(nd, pred, None, inter_samples_flat).detach()
     pred = pred.reshape(*orig_shape).detach()
     true_eps = true_eps.reshape(*orig_shape).detach()
 

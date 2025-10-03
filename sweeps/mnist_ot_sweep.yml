@@ -9,6 +9,8 @@ parameters:
         value: 128
     num_samples:
         value: 5_000
+    divergence_dims:
+        value: 16
     artifact:
         values:
             - dpfrommer-projects/nanogen_mnist/diffuser:v25
