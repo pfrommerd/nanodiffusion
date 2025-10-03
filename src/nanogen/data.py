@@ -217,7 +217,9 @@ class Image(DataPoint):
 
     def to_dataframe(self):
         if self.image.ndim == 4:
-            images = (self.image.cpu().numpy()*255).astype(np.uint8).squeeze(-1)
+            images = (self.image.cpu().numpy()*255).astype(np.uint8)
+            if images.shape[-1] == 1:
+                images = images.squeeze(-1)
             columns : dict = {"image": [PIL.Image.fromarray(images[i]) for i in range(images.shape[0])]}
             if self.label is not None:
                 columns["label"] = self.label.cpu().numpy()
@@ -227,7 +229,9 @@ class Image(DataPoint):
                     columns[f"embed_{i}"] = embed[:, i]
             return pd.DataFrame(columns)
         else:
-            images = (self.image.cpu().numpy()*255).astype(np.uint8).squeeze(-1)
+            images = (self.image.cpu().numpy()*255).astype(np.uint8)
+            if images.shape[-1] == 1:
+                images = images.squeeze(-1)
             columns : dict = {"image": [PIL.Image.fromarray(images)]}
             if self.label is not None: columns["label"] = [self.label.cpu().numpy()]
             if self.embed is not None:
@@ -336,7 +340,7 @@ class TsneTransform(DataTransform):
                 tsne_data.append(np.concatenate([
                     data_utils.decode_as_numpy(batch.column(field), field_mime).reshape(batch.num_rows, -1)
                     for field, field_mime in field_infos
-                ], axis=-1))
+                ], axis=-1).astype(np.float32))
         tsne_data = np.concatenate(tsne_data, axis=0)
         # compute tsne for all of the data
         logger.info(f"Computing t-SNE on {tsne_data.shape}, {tsne_data.dtype}")
@@ -364,3 +368,4 @@ class TsneTransform(DataTransform):
             return writer.close()
 
 tsne_image = TsneTransform(["image"])
+tsne_attrs = TsneTransform(["attrs"])

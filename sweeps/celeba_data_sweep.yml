@@ -1,0 +1,36 @@
+program: train
+project: nanogen_celeba
+name: sampler_data_sweep
+method: grid
+parameters:
+    wandb:
+        value: true
+    model.diffusion.nn.type:
+        value: unet
+        #model.diffusion.sampler_preset:
+        #values: ["ddim", "ddpm", "accel"]
+    limit_data:
+        values: [10_000, 50_000, 100_000, 160_000]
+    batch_size:
+        value: 256
+    gen_batch_size:
+        value: 64
+    model.diffusion.sample_timesteps:
+        value: 16
+    model.diffusion.nn.unet.base_channels:
+        value: 128
+    model.diffusion.nn.unet.num_groups:
+        value: 32
+    iterations:
+        # value: 150 # for smoke testing
+        value: 300_000
+    optimizer.lr:
+        value: 0.0003
+    data:
+        value: celeba
+    distill:
+        value: false
+command:
+    - ${env}
+    - ${program}
+    - ${args}
