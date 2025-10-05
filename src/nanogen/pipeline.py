@@ -1,5 +1,5 @@
 import logging
-import accelerate
+import math
 import torch
 import random
 import itertools
@@ -96,6 +96,10 @@ class GenerativePipeline(ty.Generic[T]):
         self.config = config
 
         self.model = model
+        t = 0
+        for k, v in self.model.state_dict().items():
+            t += math.prod(v.shape)
+
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
 
