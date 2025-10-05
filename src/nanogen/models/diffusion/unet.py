@@ -235,7 +235,7 @@ class UnetConfig(DiffuserConfig):
     channel_mults: ty.Sequence[int] = (1, 2, 2, 2)
     embed_channel_mult: int = 4
     num_res_blocks: int = 2
-    attn_resolutions: ty.Sequence[int] = (4,)
+    attn_resolutions: ty.Sequence[int] = (16,)
     dropout: float = 0.1
     resample_with_conv: bool = True
     num_groups: int = 32

@@ -29,8 +29,10 @@ class AdamwConfig(OptimizerConfig):
             eps=self.eps,
             weight_decay=self.weight_decay
         )
-        return optim, CosineAnnealingLR(
-            optimizer=optim,
-            T_max=iterations,
-            eta_min=1e-6
-        )
+        return optim, None
+
+        #CosineAnnealingLR(
+        #    optimizer=optim,
+        #    T_max=iterations,
+        #    eta_min=1e-6
+        #)
