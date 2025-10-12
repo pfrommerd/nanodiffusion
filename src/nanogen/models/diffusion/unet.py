@@ -89,6 +89,9 @@ class AttnBlock(nn.Module):
         h_ = h_.view(h_.shape[0], h_.shape[1], *spatial_dims)
         return x + self.proj_out(h_)
 
+def alpha(sigma):
+    return (1/(1+sigma**2)).sqrt()
+
 class Unet(ModelMixin, Diffuser):
     def __init__(self, in_dim, in_ch, out_ch,
                  ch               = 128,
@@ -105,7 +108,7 @@ class Unet(ModelMixin, Diffuser):
         self.in_dim = in_dim
         self.num_resolutions = len(ch_mult)
         self.num_res_blocks = num_res_blocks
-        self.input_dims = (in_ch, in_dim, in_dim)
+        self.input_dims = (in_dim, in_dim, ch)
         self.temb_ch = self.ch * embed_ch_mult
 
         # Embeddings
@@ -116,7 +119,7 @@ class Unet(ModelMixin, Diffuser):
         self.cond_embed = cond_embed
 
         # Downsampling
-        in_ch_dim = [ch * m for m in (1,)+ch_mult]
+        in_ch_dim = [ch * m for m in (1,)+tuple(ch_mult)]
         self.conv_in = nn.Conv2d(in_ch, self.ch, kernel_size=3, stride=1, padding=1)
         self.downs = nn.ModuleList()
         block_in, block_out = 0, 0
@@ -196,9 +199,11 @@ class Unet(ModelMixin, Diffuser):
         return self.out_layer(h)
 
     def forward(self, x, sigma, cond=None):
+        a = alpha(sigma).reshape(sigma.shape + (1,) * (len(x.shape) - 1))
         emb = self.sig_embed(x.shape[0], sigma.squeeze())
         # transpose from NHWC to NCHW
         x = rearrange(x, 'b h w c -> b c h w')
+        x = a*x
         x = self.fwd_emb(x, emb, cond)
         x = rearrange(x, 'b c h w -> b h w c')
         return x

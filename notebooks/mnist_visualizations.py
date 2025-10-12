@@ -30,7 +30,7 @@ def _(wandb):
     api = wandb.Api()
     # OLD: dpfrommer-projects/nanogen_mnist/nqlofeyh
     # NEW: dpfrommer-projects/nanogen_mnist/cylpdnas
-    sweep = api.sweep("dpfrommer-projects/nanogen_mnist/cylpdnas")
+    sweep = api.sweep("dpfrommer-projects/nanogen_mnist/t3c0i7vz")
     return api, sweep
 
 
@@ -116,6 +116,14 @@ def _(calc_density, np, plt):
 
 @app.cell
 def _(mnist_data, mnist_labels, np, plt, scipy, transformed_data):
+    def interpolate(cond, data, grid_x, grid_y):
+        grid = np.stack((grid_x.reshape(-1), grid_y.reshape(-1)), axis=-1)
+        diff = cond[None, :, :] - grid[:, None, :]
+        weight = np.sum(np.square(diff), axis=-1)
+        weight = scipy.special.softmax(-0.1*weight, axis=-1)
+        interpolated = weight @ data
+        return interpolated.reshape(grid_x.shape)
+
     def heatmaps(fig, axs, column, label, vmin = None, vmax = None, normalize=False):
         from matplotlib.colors import LogNorm
         colors = [
@@ -137,16 +145,17 @@ def _(mnist_data, mnist_labels, np, plt, scipy, transformed_data):
         for i, ((samples, sub_data), ax) in enumerate(zip(groups, axs)):
             # evaluate on a grid
             cond = np.stack((sub_data["condition/0"], sub_data["condition/1"]), axis=-1)
-            values = scipy.interpolate.griddata(cond, sub_data[column].to_numpy(),
-                                                (grid_x, grid_y), method='nearest')[::-1,:]
-            if normalize:
+            # values = scipy.interpolate.griddata(cond, sub_data[column].to_numpy(),
+            #                                     (grid_x, grid_y), method='nearest')[::-1,:]
+            values = interpolate(cond, sub_data[column].to_numpy(), grid_x, grid_y)[::-1,:]
+            if False:
                 values = values / values.max()
                 vmin = vmin or values.min()
                 vmax = vmax or 1.
             cbar = ax.imshow(values,cmap="binary", extent=[-100, 100, -100, 100],
                                                 vmin=vmin, vmax=vmax, rasterized=True)
             ax.scatter(mnist_data[::5,0], mnist_data[::5,1],
-                             c=[colors[l] for l in mnist_labels[::5]], s=1.5, alpha=0.8,
+                             c=[colors[l] for l in mnist_labels[::5]], s=2, alpha=0.8,
                              rasterized=True)
             ax.grid(False)
             cbars.append(cbar)
@@ -161,7 +170,7 @@ def _(mnist_data, mnist_labels, np, plt, scipy, transformed_data):
     _fig.subplots_adjust(hspace=-0.1, wspace=0.18)
     #_fig.tight_layout()
     _fig = heatmaps(_fig, _axs[0], "ddpm_ddim_dist", "DDPM/DDIM OT Distance", 0.5, 8)
-    _fig = heatmaps(_fig, _axs[1], "ddpm_si", "DDPM Schedule Deviation", 50, 170)
+    _fig = heatmaps(_fig, _axs[1], "ddpm_si", "DDPM Schedule Deviation", 50, 140)
     _axs[-1][0].set_xlabel("t-SNE First Component")
     _axs[-1][1].set_xlabel("t-SNE First Component")
     _axs[-1][2].set_xlabel("t-SNE First Component")
@@ -182,9 +191,9 @@ def _(heatmaps, plt):
     _fig = heatmaps(_fig, _axs[0], "ddpm_ddim_dist", "DDPM/DDIM OT Distance", 0.5, 8)
     _fig = heatmaps(_fig, _axs[1], "ddpm_accel_dist", "DDPM/GE OT Distance", 0.5, 8)
     _fig = heatmaps(_fig, _axs[2], "ddim_accel_dist", "DDIM/GE OT Distance", 0.5, 8)
-    _fig = heatmaps(_fig, _axs[3], "ddpm_si", "DDPM Schedule Deviation", 50, 150)
-    _fig = heatmaps(_fig, _axs[4], "ddim_si", "DDIM Schedule Deviation", 50, 150)
-    _fig = heatmaps(_fig, _axs[5], "accel_si", "GE Schedule Deviation",  50, 150)
+    _fig = heatmaps(_fig, _axs[3], "ddpm_si", "DDPM Schedule Deviation", 50, 140)
+    _fig = heatmaps(_fig, _axs[4], "ddim_si", "DDIM Schedule Deviation", 50, 140)
+    _fig = heatmaps(_fig, _axs[5], "accel_si", "GE Schedule Deviation",  50, 140)
     for _ax in _axs[-1]:
         _ax.set_xlabel("t-SNE First Component")
         _ax.set_xticks([-75, -25, 25, 75])
@@ -217,7 +226,7 @@ def _():
 @app.cell
 def _(Path, api, pd):
     def load_capacity_sweep():
-        sweep = api.sweep("dpfrommer-projects/nanogen_mnist/d00hkee9")
+        sweep = api.sweep("dpfrommer-projects/nanogen_mnist/1y7jm61s")
         artifacts = list(list(a for a in run.logged_artifacts() if a.type == "results")[0]
                        for run in sweep.runs if list(a for a in run.logged_artifacts() if a.type == "results"))
         data = []

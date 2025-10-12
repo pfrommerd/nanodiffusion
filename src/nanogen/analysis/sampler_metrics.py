@@ -82,7 +82,7 @@ def measure_si(model, cond, final_samples, sigma, nd) -> torch.Tensor:
     true_eps = (x_flat - x0_flat) / sigma
     # use zeros for the comparison since true_eps
     # comes from nabla log p
-    div = divergence_diff(nd, pred, None, inter_samples_flat).detach()
+    div = 0. # divergence_diff(nd, pred, None, inter_samples_flat).detach()
     pred = pred.reshape(*orig_shape).detach()
     true_eps = true_eps.reshape(*orig_shape).detach()
 

@@ -28,7 +28,7 @@ def _():
 @app.cell
 def _(wandb):
     api = wandb.Api()
-    sweep = api.sweep("dpfrommer-projects/nanogen_fashion_mnist/a6py7u6u")
+    sweep = api.sweep("dpfrommer-projects/nanogen_fashion_mnist/63tcx37t")
     return api, sweep
 
 
@@ -113,6 +113,14 @@ def _(calc_density, np, plt):
 
 @app.cell
 def _(mnist_data, mnist_labels, np, plt, scipy, transformed_data):
+    def interpolate(cond, data, grid_x, grid_y):
+        grid = np.stack((grid_x.reshape(-1), grid_y.reshape(-1)), axis=-1)
+        diff = cond[None, :, :] - grid[:, None, :]
+        weight = np.sum(np.square(diff), axis=-1)
+        weight = scipy.special.softmax(-0.1*weight, axis=-1)
+        interpolated = weight @ data
+        return interpolated.reshape(grid_x.shape)
+
     def heatmaps(fig, axs, column, label, vmin = None, vmax = None, normalize=False):
         from matplotlib.colors import LogNorm
         colors = [
@@ -134,8 +142,9 @@ def _(mnist_data, mnist_labels, np, plt, scipy, transformed_data):
         for i, ((samples, sub_data), ax) in enumerate(zip(groups, axs)):
             # evaluate on a grid
             cond = np.stack((sub_data["condition/0"], sub_data["condition/1"]), axis=-1)
-            values = scipy.interpolate.griddata(cond, sub_data[column].to_numpy(),
-                                                (grid_x, grid_y), method='nearest')[::-1,:]
+            values = interpolate(cond, sub_data[column].to_numpy(), grid_x, grid_y)[::-1,:]
+            # values = scipy.interpolate.griddata(cond, sub_data[column].to_numpy(),
+            #                                     (grid_x, grid_y), method='nearest')[::-1,:]
             if i == 0:
                 values = values.clip(0, 150)
 
@@ -160,7 +169,7 @@ def _(mnist_data, mnist_labels, np, plt, scipy, transformed_data):
     _fig.subplots_adjust(hspace=0.06, wspace=0.06)
     #_fig.tight_layout()
     _fig = heatmaps(_fig, _axs[0], "ddpm_ddim_dist", "DDPM/DDIM OT Distance", 0.5, 7)
-    _fig = heatmaps(_fig, _axs[1], "ddpm_si", "DDPM Schedule Deviation", 50, 310)
+    _fig = heatmaps(_fig, _axs[1], "ddpm_si", "DDPM Schedule Deviation", 50, 150)
     _axs[-1][0].set_xlabel("t-SNE First Component")
     _axs[-1][1].set_xlabel("t-SNE First Component")
     _axs[-1][2].set_xlabel("t-SNE First Component")
@@ -182,8 +191,8 @@ def _(heatmaps, plt):
     _fig = heatmaps(_fig, _axs[1], "ddpm_accel_dist", "DDPM/GE OT Distance", 0.5, 7)
     _fig = heatmaps(_fig, _axs[2], "ddim_accel_dist", "DDIM/GE OT Distance", 0.5, 7)
     _fig = heatmaps(_fig, _axs[3], "ddpm_si", "DDPM Schedule Deviation", 50, 300)
-    _fig = heatmaps(_fig, _axs[4], "ddim_si", "DDIM Schedule Deviation", 40, 400)
-    _fig = heatmaps(_fig, _axs[5], "accel_si", "GE Schedule Deviation", 40, 450)
+    _fig = heatmaps(_fig, _axs[4], "ddim_si", "DDIM Schedule Deviation", 50, 400)
+    _fig = heatmaps(_fig, _axs[5], "accel_si", "GE Schedule Deviation", 50, 450)
     for _ax in _axs[-1]:
         _ax.set_xlabel("t-SNE First Component")
         _ax.set_xticks([-75, -25, 25, 75])
@@ -216,7 +225,7 @@ def _():
 @app.cell
 def _(api, pd):
     def load_capacity_train_history():
-        sweep = api.sweep("dpfrommer-projects/nanogen_mnist/pjz731bz")
+        sweep = api.sweep("dpfrommer-projects/nanogen_fashion_mnist/r2r4lr8f")
         data = []
         for run in sweep.runs:
             loss_history = run.history(keys=["loss/test", "loss/train"], samples=4000)
@@ -233,7 +242,7 @@ def _(api, pd):
 def _(mnist_data, mnist_labels, np, pd, plt, transformed_data):
     def _():
         fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(10,4))
-    
+
         td = transformed_data.copy()
         mean_data = td.groupby("samples").median().reset_index()
         high_data = td.groupby("samples").quantile(0.75).reset_index()

@@ -1,0 +1,23 @@
+program: metrics
+project: nanogen_celeba
+name: sampler_data_sweep
+method: grid
+parameters:
+    wandb:
+        value: true
+    batch_size:
+        value: 128
+    num_samples:
+        value: 5_000
+    divergence_dims:
+        value: 16
+    artifact:
+        values:
+            - dpfrommer-projects/nanogen_celeba/diffuser:v5
+            - dpfrommer-projects/nanogen_celeba/diffuser:v4
+            - dpfrommer-projects/nanogen_celeba/diffuser:v3
+            - dpfrommer-projects/nanogen_celeba/diffuser:v2
+command:
+    - ${env}
+    - ${program}
+    - ${args}

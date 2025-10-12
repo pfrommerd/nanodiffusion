@@ -79,7 +79,7 @@ def main():
                     embed_features=128
                 ),
                 schedule=LogLinearScheduleConfig(
-                    timesteps=512, sigma_min=5e-4, sigma_max=5
+                    timesteps=512, sigma_min=1e-2, sigma_max=35
                 ),
                 sample_timesteps=32,
                 ideal_denoiser=False
